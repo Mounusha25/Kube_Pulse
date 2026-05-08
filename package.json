@@ -1,0 +1,23 @@
+{
+  "name": "k8s_ai_agent",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev" : "node index.js"
+  },
+  "dependencies": {
+    "@langchain/anthropic": "^0.3.18",
+    "@langchain/community": "^0.3.41",
+    "@langchain/core": "^0.3.45",
+    "@langchain/google-genai": "^0.2.4",
+    "@langchain/langgraph": "^0.2.64",
+    "@langchain/openai": "^0.5.5",
+    "axios": "^1.8.4",
+    "express": "^5.1.0"
+  }
+}
