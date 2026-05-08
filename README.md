@@ -1,6 +1,6 @@
-# 🛡️ KubeGuard — Autonomous Kubernetes AI Monitoring Agent
+# 🛡️ KubePulse — Autonomous Kubernetes AI Monitoring Agent
 
-![KubeGuard Banner](./banner.png)
+![KubePulse Banner](./kubepulse_cover.png)
 
 > **Real-time pod anomaly detection and LLM-powered self-healing for Kubernetes workloads.**
 
@@ -16,9 +16,9 @@
 
 ## Overview
 
-**KubeGuard** is an autonomous AIOps agent that continuously monitors Kubernetes pod memory usage, predicts anomalies before they cause outages, and leverages a Large Language Model to automatically suggest remediation commands — all in real time.
+**KubePulse** is an autonomous AIOps agent that continuously monitors Kubernetes pod memory usage, predicts anomalies before they cause outages, and leverages a Large Language Model to automatically suggest remediation commands — all in real time.
 
-Traditional Kubernetes monitoring tools alert you *after* a problem occurs. KubeGuard is **predictive**: it uses a hybrid LSTM + LightGBM ML pipeline to forecast memory behavior and detect anomalies before they escalate into `CrashLoopBackOff` or OOMKilled events.
+Traditional Kubernetes monitoring tools alert you *after* a problem occurs. KubePulse is **predictive**: it uses a hybrid LSTM + LightGBM ML pipeline to forecast memory behavior and detect anomalies before they escalate into `CrashLoopBackOff` or OOMKilled events.
 
 ---
 
@@ -26,7 +26,7 @@ Traditional Kubernetes monitoring tools alert you *after* a problem occurs. Kube
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        KubeGuard Agent                          │
+│                        KubePulse Agent                          │
 │                                                                 │
 │  ┌──────────────┐    ┌──────────────┐    ┌───────────────────┐  │
 │  │  Prometheus  │───▶│  Node.js     │───▶│  Python ML Engine │  │
@@ -91,7 +91,7 @@ The **hybrid approach** separates concerns: LSTM captures temporal patterns in m
 ## Project Structure
 
 ```
-KubeGuard/
+KubePulse/
 ├── index.js                        # Main agent: metrics collection, orchestration, LLM integration
 ├── hybrid_predict.py               # ML inference engine: LSTM + LightGBM anomaly detection
 ├── hybrid_lstm_model.keras         # Pre-trained LSTM model (TensorFlow/Keras)
@@ -99,7 +99,7 @@ KubeGuard/
 ├── lightgbm_anomaly.pkl            # Trained LightGBM anomaly classifier
 ├── exp.js                          # Utility: K8s API exploration script
 ├── package.json                    # Node.js dependencies
-└── kubeguard-exporter/             # Go Prometheus custom metrics exporter
+└── kubepulse-exporter/             # Go Prometheus custom metrics exporter
     ├── main.go                     # HTTP server exposing /report and /metrics
     ├── go.mod                      # Go module definition
     ├── Dockerfile                  # Multi-stage Docker build
@@ -109,9 +109,9 @@ KubeGuard/
 
 ---
 
-## Go Prometheus Exporter (`kubeguard-exporter`)
+## Go Prometheus Exporter (`kubepulse-exporter`)
 
-A purpose-built Go microservice that acts as the **metrics bridge** between the KubeGuard agent and Prometheus.
+A purpose-built Go microservice that acts as the **metrics bridge** between the KubePulse agent and Prometheus.
 
 ### Exposed Endpoints
 
@@ -125,27 +125,27 @@ A purpose-built Go microservice that acts as the **metrics bridge** between the 
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `kubeguard_predicted_memory_ratio` | Gauge | LSTM-forecasted memory usage (0–1, per pod label) |
-| `kubeguard_anomaly_detected` | Gauge | 1 = anomaly active, 0 = healthy (per pod label) |
-| `kubeguard_anomalies_total` | Counter | Cumulative anomaly count since exporter start |
+| `kubepulse_predicted_memory_ratio` | Gauge | LSTM-forecasted memory usage (0–1, per pod label) |
+| `kubepulse_anomaly_detected` | Gauge | 1 = anomaly active, 0 = healthy (per pod label) |
+| `kubepulse_anomalies_total` | Counter | Cumulative anomaly count since exporter start |
 
 ### Deploy the Exporter
 
 ```bash
 # Build the Docker image
-cd kubeguard-exporter
-docker build -t kubeguard-exporter:latest .
+cd kubepulse-exporter
+docker build -t kubepulse-exporter:latest .
 
 # Deploy to Kubernetes
 kubectl apply -f k8s/exporter-deployment.yaml
 
 # Verify it's running
-kubectl get pods -l app=kubeguard-exporter
+kubectl get pods -l app=kubepulse-exporter
 ```
 
 ### HPA Integration (Horizontal Pod Autoscaler)
 
-Since KubeGuard exposes `kubeguard_predicted_memory_ratio` as a real Prometheus metric, Kubernetes HPA can use it via the [Prometheus Adapter](https://github.com/kubernetes-sigs/prometheus-adapter) to **auto-scale workloads** based on predicted memory — closing the full AIOps loop.
+Since KubePulse exposes `kubepulse_predicted_memory_ratio` as a real Prometheus metric, Kubernetes HPA can use it via the [Prometheus Adapter](https://github.com/kubernetes-sigs/prometheus-adapter) to **auto-scale workloads** based on predicted memory — closing the full AIOps loop.
 
 ---
 
@@ -162,8 +162,8 @@ Since KubeGuard exposes `kubeguard_predicted_memory_ratio` as a real Prometheus 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/Brijesh03032001/KubeGuard.git
-cd KubeGuard
+git clone https://github.com/Mounusha25/Kube_Pulse.git
+cd Kube_Pulse
 ```
 
 ### 2. Install Node.js Dependencies
@@ -192,20 +192,20 @@ In `index.js`, update the pod name to match your deployment:
 const podName = "your-pod-name-here"
 ```
 
-### 6. Run KubeGuard
+### 6. Run KubePulse
 
 ```bash
 npm run dev
 ```
 
-KubeGuard will begin collecting metrics. After 10 seconds of warm-up, ML predictions start streaming and anomaly detection goes live.
+KubePulse will begin collecting metrics. After 10 seconds of warm-up, ML predictions start streaming and anomaly detection goes live.
 
 ---
 
 ## Sample Output
 
 ```
-[KubeGuard] Collecting memory metrics...
+[KubePulse] Collecting memory metrics...
 [0.42, 0.45, 0.48, 0.51, 0.53, 0.58, 0.63, 0.71, 0.79, 0.88]
 
 ✅ Healthy. Predicted Memory: 0.91
@@ -224,7 +224,7 @@ KubeGuard will begin collecting metrics. After 10 seconds of warm-up, ML predict
 |----------|-----------------|-----------------|-----------------|
 | Threshold alerts | After breach | High | ❌ |
 | Prometheus alerting rules | After breach | Medium | ❌ |
-| **KubeGuard (LSTM + LightGBM)** | **Before breach** | **Low** | **✅ LLM-powered** |
+| **KubePulse (LSTM + LightGBM)** | **Before breach** | **Low** | **✅ LLM-powered** |
 
 ---
 
@@ -251,7 +251,7 @@ KubeGuard will begin collecting metrics. After 10 seconds of warm-up, ML predict
 
 ## Author
 
-**Brijesh Kumar** — [GitHub](https://github.com/Brijesh03032001)
+**Mounusha** — [GitHub](https://github.com/Mounusha25)
 
 ---
 
