@@ -88,3 +88,38 @@ test("skips a pod with invalid resources without blocking valid targets", async 
   await monitor.poll();
   assert.deepEqual([...monitor.states.keys()], ["api-1"]);
 });
+
+test("exports sustained per-pod drift status with predictions", async () => {
+  const reports = [];
+  const reference = {
+    features: {
+      memory_ratio: { upper_bounds: [0.5, null], expected_proportions: [0.5, 0.5] },
+      predicted_memory_ratio: { upper_bounds: [0.5, null], expected_proportions: [0.5, 0.5] },
+    },
+  };
+  const monitor = new MultiPodMonitor({
+    kubernetes: {
+      listPods: async () => [pod("api-0")],
+      getMemoryLimitBytesFromPod: () => 100,
+      isCrashLooping: async () => false,
+    },
+    prometheus: { queryScalar: async () => 90 },
+    engine: { predict: async () => ({ predictedMemory: 0.9, isAnomaly: 0 }) },
+    reporter: async (payload) => reports.push(payload),
+    suggestCommand: async () => "unused",
+    namespace: "shop",
+    windowSize: 1,
+    driftReference: reference,
+    driftWindowSize: 2,
+    driftMinimumSamples: 2,
+    driftThreshold: 0.2,
+    driftConsecutiveWindows: 1,
+    logger: { log: () => {}, warn: () => {}, error: () => {} },
+  });
+  await monitor.poll();
+  await monitor.poll();
+  assert.equal(reports.at(-1).driftReady, 1);
+  assert.equal(reports.at(-1).driftDetected, 1);
+  assert.equal(reports.at(-1).retrainingRecommended, 1);
+  assert.equal(reports.at(-1).driftWindowSamples, 2);
+});

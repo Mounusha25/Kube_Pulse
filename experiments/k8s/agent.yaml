@@ -65,6 +65,14 @@ spec:
               value: "10"
             - name: KUBEPULSE_REMEDIATION_ENABLED
               value: "false"
+            - name: KUBEPULSE_DRIFT_ENABLED
+              value: "true"
+            - name: KUBEPULSE_DRIFT_WINDOW_SIZE
+              value: "120"
+            - name: KUBEPULSE_DRIFT_MIN_SAMPLES
+              value: "60"
+            - name: KUBEPULSE_DRIFT_CONSECUTIVE_WINDOWS
+              value: "3"
           resources:
             requests:
               cpu: 100m

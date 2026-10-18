@@ -11,6 +11,7 @@ measurement window.
 - kube-prometheus-stack and Prometheus Adapter
 - KubePulse Node/Python agent with label-based pod discovery and independent windows
 - Go prediction exporter and `ServiceMonitor`
+- PSI model-drift gauges and a sustained-drift `PrometheusRule`
 - Deployment-based memory workload and distributed ramp load generator
 
 The setup uses in-cluster service-account authentication and namespace-scoped

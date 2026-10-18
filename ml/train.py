@@ -13,6 +13,7 @@ import tensorflow as tf
 
 from ml.dataset import build_splits, load_traces
 from ml.features import best_f1_threshold, classifier_features
+from ml.drift import build_reference, write_reference
 
 
 def set_seeds(seed: int) -> None:
@@ -97,6 +98,18 @@ def main() -> None:
         "final_validation_mae": float(history.history["val_mae"][-1]),
     }
     (args.output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    write_reference(
+        build_reference(
+            dataset_path=args.dataset,
+            input_values=train.current_ratio,
+            forecast_values=train_forecast,
+            calibration_input_values=validation.current_ratio,
+            calibration_forecast_values=validation_forecast,
+            calibration_trace_ids=validation.trace_ids,
+            model_version="v2",
+        ),
+        args.output_dir / "drift_reference.json",
+    )
     print(json.dumps(metadata, indent=2))
 
 

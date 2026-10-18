@@ -9,6 +9,12 @@ function positiveInteger(name, rawValue, fallback) {
   return value;
 }
 
+function positiveNumber(name, rawValue, fallback) {
+  const value = rawValue === undefined ? fallback : Number(rawValue);
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number`);
+  return value;
+}
+
 export function loadConfig(env = process.env) {
   const podName = env.KUBEPULSE_POD_NAME?.trim();
   const podSelector = env.KUBEPULSE_POD_SELECTOR?.trim();
@@ -17,6 +23,11 @@ export function loadConfig(env = process.env) {
   }
   if (podName && podSelector) {
     throw new Error("Set only one of KUBEPULSE_POD_NAME or KUBEPULSE_POD_SELECTOR");
+  }
+  const driftWindowSize = positiveInteger("KUBEPULSE_DRIFT_WINDOW_SIZE", env.KUBEPULSE_DRIFT_WINDOW_SIZE, 120);
+  const driftMinimumSamples = positiveInteger("KUBEPULSE_DRIFT_MIN_SAMPLES", env.KUBEPULSE_DRIFT_MIN_SAMPLES, 60);
+  if (driftMinimumSamples > driftWindowSize) {
+    throw new Error("KUBEPULSE_DRIFT_MIN_SAMPLES cannot exceed KUBEPULSE_DRIFT_WINDOW_SIZE");
   }
   return {
     podName: podName || null,
@@ -40,6 +51,18 @@ export function loadConfig(env = process.env) {
     serviceAccountTokenPath: env.KUBEPULSE_SA_TOKEN_PATH || "/var/run/secrets/kubernetes.io/serviceaccount/token",
     serviceAccountCaPath: env.KUBEPULSE_SA_CA_PATH || "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
     remediationEnabled: env.KUBEPULSE_REMEDIATION_ENABLED === "true",
+    driftEnabled: env.KUBEPULSE_DRIFT_ENABLED !== "false",
+    driftReferencePath: env.KUBEPULSE_DRIFT_REFERENCE || path.join(projectRoot, "models", "v2", "drift_reference.json"),
+    driftWindowSize,
+    driftMinimumSamples,
+    driftThreshold: env.KUBEPULSE_DRIFT_THRESHOLD === undefined
+      ? null
+      : positiveNumber("KUBEPULSE_DRIFT_THRESHOLD", env.KUBEPULSE_DRIFT_THRESHOLD, 0.2),
+    driftConsecutiveWindows: positiveInteger(
+      "KUBEPULSE_DRIFT_CONSECUTIVE_WINDOWS",
+      env.KUBEPULSE_DRIFT_CONSECUTIVE_WINDOWS,
+      3,
+    ),
     projectRoot,
   };
 }

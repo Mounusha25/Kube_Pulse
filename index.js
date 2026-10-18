@@ -3,6 +3,7 @@ import axios from "axios";
 import { loadConfig } from "./src/config.js";
 import { suggestCommandWithGemini } from "./src/gemini.js";
 import { createKubernetesHttpClient } from "./src/http.js";
+import { loadDriftReference } from "./src/drift-detector.js";
 import { KubernetesClient } from "./src/kubernetes.js";
 import { MultiPodMonitor } from "./src/monitor.js";
 import { PrometheusClient } from "./src/prometheus.js";
@@ -34,6 +35,7 @@ async function main() {
   });
   const prometheus = new PrometheusClient({ httpClient: axios, baseUrl: config.prometheusUrl, timeoutMs: config.requestTimeoutMs });
   const engine = new PredictionEngine({ pythonBin: config.pythonBin, scriptPath: config.modelScript, cwd: config.projectRoot });
+  const driftReference = config.driftEnabled ? loadDriftReference(config.driftReferencePath) : null;
   const monitor = new MultiPodMonitor({
     kubernetes,
     prometheus,
@@ -45,6 +47,11 @@ async function main() {
     windowSize: config.windowSize,
     predictionTimeoutMs: config.predictionTimeoutMs,
     remediationEnabled: config.remediationEnabled,
+    driftReference,
+    driftWindowSize: config.driftWindowSize,
+    driftMinimumSamples: config.driftMinimumSamples,
+    driftThreshold: config.driftThreshold ?? driftReference?.monitoring?.thresholds,
+    driftConsecutiveWindows: config.driftConsecutiveWindows,
   });
   let stopping = false;
 

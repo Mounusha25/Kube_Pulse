@@ -1,4 +1,5 @@
 import { buildMemoryQuery } from "./prometheus.js";
+import { DriftDetector } from "./drift-detector.js";
 import { routePrediction } from "./remediation.js";
 
 export class MultiPodMonitor {
@@ -13,6 +14,11 @@ export class MultiPodMonitor {
     windowSize = 10,
     predictionTimeoutMs = 10000,
     remediationEnabled = false,
+    driftReference = null,
+    driftWindowSize = 120,
+    driftMinimumSamples = 60,
+    driftThreshold = 0.2,
+    driftConsecutiveWindows = 3,
     logger = console,
   }) {
     Object.assign(this, {
@@ -26,6 +32,11 @@ export class MultiPodMonitor {
       windowSize,
       predictionTimeoutMs,
       remediationEnabled,
+      driftReference,
+      driftWindowSize,
+      driftMinimumSamples,
+      driftThreshold,
+      driftConsecutiveWindows,
       logger,
     });
     this.states = new Map();
@@ -48,7 +59,14 @@ export class MultiPodMonitor {
       if (existing) {
         existing.memoryLimitBytes = memoryLimitBytes;
       } else {
-        this.states.set(podName, { memoryLimitBytes, window: [] });
+        const drift = this.driftReference ? new DriftDetector({
+          reference: this.driftReference,
+          windowSize: this.driftWindowSize,
+          minimumSamples: this.driftMinimumSamples,
+          threshold: this.driftThreshold,
+          consecutiveWindows: this.driftConsecutiveWindows,
+        }) : null;
+        this.states.set(podName, { memoryLimitBytes, window: [], drift, driftAlerted: false });
         this.logger.log(`[KubePulse] Discovered ${this.namespace}/${podName}`);
       }
     }
@@ -81,7 +99,9 @@ export class MultiPodMonitor {
       podName,
       containerName: this.containerName,
     }));
-    state.window.push(memoryBytes / state.memoryLimitBytes);
+    const memoryRatio = memoryBytes / state.memoryLimitBytes;
+    state.window.push(memoryRatio);
+    state.drift?.observeInput(memoryRatio);
     if (state.window.length > this.windowSize) state.window.shift();
     if (state.window.length < this.windowSize) {
       this.logger.log(`[KubePulse] ${podName} warm-up ${state.window.length}/${this.windowSize}`);
@@ -92,12 +112,29 @@ export class MultiPodMonitor {
       { podName, memoryUsage: state.window },
       this.predictionTimeoutMs,
     );
+    const drift = state.drift?.observePrediction(prediction.predictedMemory) || {
+      driftReady: 0,
+      inputDriftPsi: 0,
+      predictionDriftPsi: 0,
+      driftDetected: 0,
+      retrainingRecommended: 0,
+      driftWindowSamples: 0,
+    };
+    if (drift.driftDetected === 1 && !state.driftAlerted) {
+      this.logger.warn(
+        `[Drift] ${podName} sustained distribution shift detected; manual retraining review recommended.`,
+      );
+      state.driftAlerted = true;
+    } else if (drift.driftDetected === 0) {
+      state.driftAlerted = false;
+    }
     try {
       await this.reporter({
         podName,
         namespace: this.namespace,
         predictedMemory: prediction.predictedMemory,
         isAnomaly: prediction.isAnomaly,
+        ...drift,
       });
     } catch (error) {
       this.logger.error(`[Exporter] ${podName} prediction could not be reported: ${error.message}`);

@@ -30,6 +30,7 @@ minikube image build -t kubeguard-exporter:dev kubeguard-exporter
 
 kubectl delete statefulset/memory-workload -n kubepulse-lab --ignore-not-found
 kubectl apply -k experiments/k8s
+kubectl rollout restart deployment/kubeguard-exporter deployment/kubepulse-agent -n kubepulse-lab
 kubectl rollout status deployment/memory-workload -n kubepulse-lab --timeout=3m
 kubectl rollout status deployment/kubeguard-exporter -n kubepulse-lab --timeout=3m
 kubectl rollout status deployment/kubepulse-agent -n kubepulse-lab --timeout=5m

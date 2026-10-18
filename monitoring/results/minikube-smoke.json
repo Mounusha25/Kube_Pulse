@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-10-18T09:48:04Z",
+  "cluster_context": "minikube",
+  "workload_state": "idle",
+  "pod": "memory-workload-d99579844-pc2gr",
+  "drift_window_samples": 94,
+  "input_drift_psi": 21.2920931020207,
+  "prediction_drift_psi": 21.281471728793203,
+  "drift_ready": true,
+  "drift_detected": true,
+  "retraining_recommended": true,
+  "prometheus_rule_operator_validated": true
+}

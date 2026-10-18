@@ -17,6 +17,9 @@ spec:
         - name: exporter
           image: kubeguard-exporter:dev
           imagePullPolicy: Never
+          env:
+            - name: KUBEGUARD_STALE_AFTER
+              value: 2m
           ports:
             - name: metrics
               containerPort: 8080
@@ -64,4 +67,24 @@ spec:
     - port: metrics
       interval: 1s
       honorLabels: true
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubepulse-model-monitoring
+  namespace: kubepulse-lab
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: kubepulse.model-drift
+      rules:
+        - alert: KubePulseModelDrift
+          expr: kubeguard_drift_ready == 1 and on(namespace, pod) kubeguard_drift_detected == 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Sustained KubePulse model drift on {{ $labels.namespace }}/{{ $labels.pod }}"
+            description: "Input or prediction PSI remained above the configured threshold. Review live data and start the approval-gated candidate retraining workflow."
 

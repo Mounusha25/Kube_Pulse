@@ -126,6 +126,52 @@ workload-specific threshold calibration remain necessary. Raw samples and the
 machine-readable summary live in `experiments/results/cluster/`; see
 [`experiments/README.md`](experiments/README.md) for reproduction steps.
 
+### Model drift monitoring
+
+KubePulse versions its drift baseline with the deployed model in
+`models/v2/drift_reference.json`. The artifact records the source dataset
+SHA-256, histogram bins, training proportions, and separate PSI thresholds for
+normalized memory inputs and LSTM forecasts. Thresholds are calibrated at the
+95th percentile across the untouched chronological validation traces instead
+of assuming that a generic PSI cutoff fits this workload.
+
+At runtime, each discovered pod keeps bounded input and forecast buffers. After
+60 paired samples, KubePulse evaluates both distributions and requires three
+consecutive shifted windows before declaring drift. The Go exporter exposes:
+
+- `kubeguard_input_drift_psi` and `kubeguard_prediction_drift_psi`
+- `kubeguard_drift_ready` and `kubeguard_drift_window_samples`
+- `kubeguard_drift_detected` and `kubeguard_retraining_recommended`
+
+The included `PrometheusRule` alerts only on sustained, ready drift state. A
+drift alert recommends investigation; it never changes the deployed model.
+Exporter series for terminated pods expire automatically (five minutes by
+default, configurable with `KUBEGUARD_STALE_AFTER`) so stale labels cannot keep
+old drift alerts alive indefinitely.
+Candidate training is available through the manually dispatched
+`Build retraining candidate` GitHub Actions workflow. Configure a required
+reviewer on the `model-retraining-approval` GitHub environment to enforce the
+approval gate. The workflow trains, runs the quality gate, and uploads a
+14-day candidate artifact—it does not commit or deploy it.
+
+The checked-in Minikube smoke test reached ready state after 94 paired samples
+and correctly flagged the idle workload as outside the synthetic training
+distribution (input PSI `21.2921`, forecast PSI `21.2815`). That finding is
+recorded as a training-coverage gap, not a resolved accuracy claim; see
+[`monitoring/results/`](monitoring/results/). The retraining workflow requires a
+reviewed, versioned CSV under `data/`, so it cannot silently train on unlabeled
+live traffic.
+
+For an offline comparison, provide live values in a CSV with `memory_ratio` and
+`predicted_memory_ratio` columns:
+
+```bash
+python -m ml.drift_report --live live-memory.csv --output drift-report.json
+```
+
+This writes machine-readable JSON and a Markdown comparison using the same
+calibrated reference as the online monitor.
+
 ---
 
 ## Tech Stack
@@ -154,10 +200,13 @@ KubePulse/
 ├── ml/                              # Deterministic data, training, evaluation, quality gate
 ├── data/kubepulse_benchmark.csv     # Versioned 14,400-row benchmark dataset
 ├── models/v2/                       # Reproducible LSTM, LightGBM, and metadata
+│   └── drift_reference.json         # Versioned PSI baseline and calibrated thresholds
 ├── benchmarks/results/              # JSON and Markdown benchmark reports
 ├── experiments/                     # Minikube workloads, HPAs, raw samples, report
+├── monitoring/results/              # Live drift smoke-test evidence
 ├── docker/Dockerfile.agent          # Node 20 + Python 3.12 inference image
 ├── scripts/setup_minikube_experiment.sh
+├── .github/workflows/retrain-candidate.yml
 ├── tests_py/                        # Dataset and feature-pipeline tests
 ├── package.json                    # Node.js dependencies
 └── kubeguard-exporter/              # Go Prometheus custom metrics exporter
@@ -189,6 +238,10 @@ A purpose-built Go microservice that acts as the **metrics bridge** between the 
 | `kubeguard_predicted_memory_ratio` | Gauge | LSTM-forecasted memory ratio, labeled by namespace and pod |
 | `kubeguard_anomaly_detected` | Gauge | 1 = anomaly active, 0 = healthy |
 | `kubeguard_anomalies_total` | Counter | Cumulative anomaly detections since exporter start |
+| `kubeguard_input_drift_psi` | Gauge | PSI for the live normalized-memory distribution |
+| `kubeguard_prediction_drift_psi` | Gauge | PSI for the live forecast distribution |
+| `kubeguard_drift_detected` | Gauge | 1 after the configured consecutive drift windows |
+| `kubeguard_retraining_recommended` | Gauge | Human-review signal; never an automatic deployment trigger |
 
 ### Deploy the Exporter
 
@@ -267,6 +320,12 @@ can also be overridden with `KUBEPULSE_PROMETHEUS_URL`,
 `KUBEPULSE_POLL_INTERVAL_MS`, `KUBEPULSE_REQUEST_TIMEOUT_MS`, and
 `KUBEPULSE_PREDICTION_TIMEOUT_MS`.
 
+Drift monitoring is enabled by default. Its bounded-window settings can be
+changed with `KUBEPULSE_DRIFT_WINDOW_SIZE`, `KUBEPULSE_DRIFT_MIN_SAMPLES`, and
+`KUBEPULSE_DRIFT_CONSECUTIVE_WINDOWS`. The versioned reference supplies the
+calibrated thresholds; `KUBEPULSE_DRIFT_THRESHOLD` intentionally overrides both
+only when explicitly set. Use `KUBEPULSE_DRIFT_ENABLED=false` to disable it.
+
 LLM remediation suggestions are disabled by default. Set
 `KUBEPULSE_REMEDIATION_ENABLED=true`, `GOOGLE_API_KEY`, and
 `KUBEPULSE_GEMINI_MODEL` only if you want suggestions; KubePulse still never
@@ -286,10 +345,14 @@ KubePulse will begin collecting metrics. After 10 seconds of warm-up, ML predict
 npm test
 ```
 
-The 25 Node tests cover dynamic discovery, per-pod state lifecycle, failure
+The 30 Node tests cover dynamic discovery, per-pod state lifecycle, PSI drift
+detection, consecutive-window gating, failure
 isolation, Kubernetes quantity parsing and container selection, Prometheus
 response validation, structured ML output, remediation routing, and Gemini
-request safety. Suggested commands are logged but never executed.
+request safety. Nine Python tests cover deterministic data, chronological
+splits, the model feature contract, drift-reference integrity, and PSI shift
+detection. The exporter also has Go handler tests. Suggested commands are
+logged but never executed.
 
 ### Run the real-cluster experiment
 
@@ -341,6 +404,7 @@ python3 experiments/run_cluster_comparison.py --duration 150 --interval 5
 ## Future Improvements
 
 - [x] Multi-pod monitoring with dynamic pod discovery and independent windows
+- [x] Versioned input/prediction drift monitoring with approval-gated retraining
 - [ ] CPU usage anomaly detection alongside memory
 - [ ] Slack/PagerDuty integration for critical alerts
 - [ ] Automatic execution of LLM-suggested commands (with approval workflow)

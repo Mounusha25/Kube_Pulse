@@ -9,6 +9,7 @@ import numpy as np
 from ml.dataset import build_splits, load_traces
 from ml.features import classifier_features
 from ml.generate_dataset import generate
+from ml.drift import build_reference, population_stability_index
 
 
 class BenchmarkDatasetTests(unittest.TestCase):
@@ -38,6 +39,28 @@ class BenchmarkDatasetTests(unittest.TestCase):
         features = classifier_features(windows, forecast)
         self.assertEqual(features.shape, (3, 7))
         self.assertTrue(np.all(np.isfinite(features)))
+
+    def test_drift_reference_is_versioned_and_normalized(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            dataset = Path(directory) / "benchmark.csv"
+            dataset.write_text("trace_id,memory_ratio\na,0.2\n", encoding="utf-8")
+            reference = build_reference(
+                dataset_path=dataset,
+                input_values=np.asarray([0.1, 0.2, 0.3]),
+                forecast_values=np.asarray([0.2, 0.3, 0.4]),
+            )
+            self.assertEqual(reference["schema_version"], "1.0")
+            self.assertEqual(reference["model_version"], "v2")
+            for feature in reference["features"].values():
+                self.assertAlmostEqual(sum(feature["expected_proportions"]), 1.0)
+                self.assertEqual(len(feature["upper_bounds"]), len(feature["expected_proportions"]))
+
+    def test_population_stability_index_detects_shift(self) -> None:
+        feature = {"upper_bounds": [0.5, None], "expected_proportions": [0.5, 0.5]}
+        stable = population_stability_index(np.asarray([0.1, 0.2, 0.7, 0.8]), feature)
+        shifted = population_stability_index(np.asarray([0.7, 0.8, 0.9, 1.0]), feature)
+        self.assertAlmostEqual(stable, 0.0)
+        self.assertGreater(shifted, 1.0)
 
 
 if __name__ == "__main__":

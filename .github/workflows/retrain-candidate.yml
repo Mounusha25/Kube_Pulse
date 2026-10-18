@@ -1,0 +1,55 @@
+name: Build retraining candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Drift alert or review ticket that justifies retraining
+        required: true
+        type: string
+      dataset_path:
+        description: Reviewed, versioned CSV under data/ to use for the candidate
+        required: true
+        default: data/kubepulse_benchmark.csv
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  retrain-candidate:
+    name: Train and validate candidate
+    runs-on: ubuntu-latest
+    environment: model-retraining-approval
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.lock
+      - name: Validate approved dataset path
+        env:
+          DATASET_PATH: ${{ inputs.dataset_path }}
+        run: |
+          case "$DATASET_PATH" in
+            data/*.csv) ;;
+            *) echo "dataset_path must be a CSV under data/"; exit 1 ;;
+          esac
+          test -f "$DATASET_PATH"
+      - name: Train and evaluate candidate
+        env:
+          DATASET_PATH: ${{ inputs.dataset_path }}
+        run: |
+          python -m ml.train --dataset "$DATASET_PATH"
+          python -m ml.evaluate --dataset "$DATASET_PATH"
+      - run: python -m ml.validate_results
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kubepulse-model-candidate
+          path: |
+            models/v2/
+            benchmarks/results/
+          if-no-files-found: error
+          retention-days: 14

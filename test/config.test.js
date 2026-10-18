@@ -23,9 +23,21 @@ test("loads safe defaults and validates timing values", () => {
   assert.equal(config.windowSize, 10);
   assert.equal(config.predictionTimeoutMs, 10000);
   assert.equal(config.remediationEnabled, false);
+  assert.equal(config.driftEnabled, true);
+  assert.equal(config.driftWindowSize, 120);
+  assert.equal(config.driftMinimumSamples, 60);
+  assert.equal(config.driftThreshold, null);
   assert.throws(
     () => loadConfig({ KUBEPULSE_POD_NAME: "api", KUBEPULSE_POLL_INTERVAL_MS: "0" }),
     /positive integer/,
+  );
+  assert.throws(
+    () => loadConfig({
+      KUBEPULSE_POD_NAME: "api",
+      KUBEPULSE_DRIFT_WINDOW_SIZE: "10",
+      KUBEPULSE_DRIFT_MIN_SAMPLES: "11",
+    }),
+    /cannot exceed/,
   );
 });
 
