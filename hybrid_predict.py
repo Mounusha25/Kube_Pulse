@@ -4,7 +4,6 @@ import numpy as np
 import sys
 import os
 import io
-import ast
 import json
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -28,9 +27,12 @@ while True:
         try:
             X_input = [float(x) for x in line['memoryUsage']]
             X_input = np.array(X_input).reshape((1, 10, 1))
-            predicted_memory = lstm_model.predict(X_input)[0][0]
+            predicted_memory = lstm_model.predict(X_input, verbose=0)[0][0]
             anomaly = gbm_model.predict([[predicted_memory]])[0]
-            print(f"{predicted_memory},{int(anomaly)}", flush=True)
+            print(json.dumps({
+                "predictedMemory": float(predicted_memory),
+                "isAnomaly": int(anomaly),
+            }), flush=True)
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr, flush=True)
 

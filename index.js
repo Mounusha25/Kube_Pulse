@@ -1,162 +1,103 @@
-import express from "express";
 import axios from "axios";
-import { spawn, exec } from 'node:child_process';
-import { Worker } from 'node:worker_threads'
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 
+import { loadConfig } from "./src/config.js";
+import { KubernetesClient } from "./src/kubernetes.js";
+import { buildMemoryQuery, PrometheusClient } from "./src/prometheus.js";
+import { PredictionEngine } from "./src/prediction-engine.js";
+import { routePrediction } from "./src/remediation.js";
 
+const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-async function sendToLLM(prompt) {
-    const chat = new ChatGoogleGenerativeAI({
-        model: "gemini-1.5-pro",
-        temperature: 0,
-        maxRetries: 2,
-    });
-
-    const res = await chat.invoke([
-        { role: "system", content: "You're a Kubernetes DevOps assistant. Given a problem, respond ONLY with a shell command to fix it." },
-        { role: "user", content: prompt }
-    ]);
-    console.log(res.content);
-    return res.content;
+async function suggestCommand({ podName, predictedMemory, memoryLimitBytes }) {
+  const chat = new ChatGoogleGenerativeAI({ model: "gemini-1.5-pro", temperature: 0, maxRetries: 2 });
+  const response = await chat.invoke([
+    {
+      role: "system",
+      content: "You are a Kubernetes SRE assistant. Return one suggested kubectl command only. Never execute it.",
+    },
+    {
+      role: "user",
+      content: `Pod ${podName} has predicted memory ratio ${predictedMemory.toFixed(4)} and a ${memoryLimitBytes}-byte limit. Suggest one kubectl command to mitigate the risk.`,
+    },
+  ]);
+  return String(response.content).trim();
 }
 
-function runShellCommand(cmd) {
-    exec(cmd, (err, stdout, stderr) => {
-        if (err) {
-            console.error(`Shell error: ${stderr}`);
-        } else {
-            console.log(`Shell output:\n${stdout}`);
-        }
-    });
-}
+async function main() {
+  const config = loadConfig();
+  const kubernetes = new KubernetesClient({
+    httpClient: axios,
+    baseUrl: config.kubernetesApiUrl,
+    namespace: config.namespace,
+    podName: config.podName,
+    containerName: config.containerName,
+    timeoutMs: config.requestTimeoutMs,
+  });
+  const prometheus = new PrometheusClient({ httpClient: axios, baseUrl: config.prometheusUrl, timeoutMs: config.requestTimeoutMs });
+  const engine = new PredictionEngine({ pythonBin: config.pythonBin, scriptPath: config.modelScript, cwd: config.projectRoot });
+  const memoryQuery = buildMemoryQuery(config);
+  const memoryLimitBytes = await kubernetes.getMemoryLimitBytes();
+  const window = [];
+  let stopping = false;
 
-async function isPodCrashLooping(podName) {
-    const res = await axios.get(`http://localhost:8001/api/v1/namespaces/default/pods/${podName}`);
-    const podData = res.data;
-    const status = podData?.status?.containerStatuses?.[0]?.state;
-    return status?.waiting?.reason === 'CrashLoopBackOff';
-}
+  const stop = () => {
+    stopping = true;
+    engine.stop();
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
 
-
-const PROMETHEUS_URL = "http://localhost:9090/api/v1/query";
-const app = express();
-const PORT = 3001;
-
-async function queryPrometheus(query, timestamp = null) {
+  console.log(`[KubePulse] Monitoring ${config.namespace}/${config.podName} every ${config.pollIntervalMs} ms`);
+  while (!stopping) {
+    const startedAt = Date.now();
     try {
-        const timeParam = timestamp ? `&time=${timestamp}` : "";
-        const response = await axios.get(`${PROMETHEUS_URL}?query=${encodeURIComponent(query)}${timeParam}`);
-        return response.data.data.result.length > 0 ? response.data.data.result[0].value[1] : null;
-    } catch (error) {
-        return null;
-    }
-}
+      const memoryBytes = await prometheus.queryScalar(memoryQuery);
+      window.push(memoryBytes / memoryLimitBytes);
+      if (window.length > config.windowSize) window.shift();
 
-const podName = "finalpod-77c649c5fc-tzvnb"
-let isRunning = false;
-let memoryUsage = [];
-// for(let i=0;i<=10;i++){
-//     memoryUsage.push(1e6);
-// }
-//
-
-async function getMaxLimit() {
-    const result = await axios.get(`http://localhost:8001/api/v1/namespaces/default/pods/${podName}`);
-    const podData = result.data;
-    const limit = podData?.spec?.containers?.[0].resources?.limits?.memory;
-    return parseInt(limit.split("M")[0])
-}
-
-let maxLimit = await getMaxLimit()
-
-const firstInterval = setInterval(async () => {
-    if (isRunning) return;
-    isRunning = true;
-    if (memoryUsage.length < 10) {
-        // const pod_status = await queryPrometheus(`kube_pod_status_phase(pod="${podName}")`);
-        const memory = await queryPrometheus(`container_memory_usage_bytes{pod="${podName}"}`) || 0;
-        memoryUsage.push(memory);
-    }
-
-    if (memoryUsage.length === 10) {
-        clearInterval(firstInterval);
-        console.log("cleared");
-        memoryUsage = memoryUsage.map((mem)=>{
-            mem/=(1024*1024);
-            mem/=(maxLimit);
-            return mem;
-        })
-        console.log(memoryUsage)
-    }
-    isRunning = false;
-}, 1000);
-
-
-setTimeout(() => {
-    const python = spawn('python', ['-u', 'hybrid_predict.py']);
-    console.log("Python process spawned");
-
-    // Attach listeners ONCE
-    python.stdout.on('data', async (data) => {
-        const lines = data.toString().split('\n');
-        console.log(data)
-        for (const line of lines) {
-            if (line.trim()) {
-                const [predictedMemory, isAnomaly] = line.trim().split(',');
-                console.log(`Predicted Memory js: ${predictedMemory}`);
-                console.log(`Is Anomaly js: ${isAnomaly}`);
-
-                // Push metrics to the Go Prometheus exporter
-                try {
-                    await axios.post("http://kubeguard-exporter:8080/report", {
-                        podName,
-                        predictedMemory: parseFloat(predictedMemory),
-                        isAnomaly: parseInt(isAnomaly),
-                    });
-                } catch (e) {
-                    console.warn(`[Exporter] Could not push metrics: ${e.message}`);
-                }
-
-                if ( typeof isAnamoly!=="undefined" && isAnamoly == 1 ) {
-                    const critical = await isPodCrashLooping(podName);
-
-                    if (critical) {
-                        console.log(`⚠️ CRITICAL: Pod ${podName} is leaking memory. Notify cluster administrator.`);
-                    } else {
-                        const prompt = `The pod ${podName} is leaking memory, and here is the predicted memory usage: ${predictedMemory}. Suggest a shell command to rectify the issue. Here is the maximum alloted memory usage limit ${maxLimit}`;
-                        const shellCommand = await sendToLLM(prompt);
-                        console.log(`🧠 LLM suggests: ${shellCommand}`);
-                        /// runShellCommand(shellCommand);
-                        maxLimit = await getMaxLimit();
-                        
-                    }
-                } else {
-                    console.log(`✅ Healthy. Predicted Memory: ${predictedMemory}`);
-                }
-            }
+      if (window.length < config.windowSize) {
+        console.log(`[KubePulse] Warm-up ${window.length}/${config.windowSize}`);
+      } else {
+        const prediction = await engine.predict(
+          { podName: config.podName, memoryUsage: window },
+          config.predictionTimeoutMs,
+        );
+        try {
+          await axios.post(config.exporterUrl, {
+            podName: config.podName,
+            predictedMemory: prediction.predictedMemory,
+            isAnomaly: prediction.isAnomaly,
+          }, { timeout: config.requestTimeoutMs });
+        } catch (error) {
+          console.error(`[Exporter] Prediction could not be reported: ${error.message}`);
         }
+
+        const result = await routePrediction({
+          prediction,
+          podName: config.podName,
+          memoryLimitBytes,
+          isCrashLooping: () => kubernetes.isCrashLooping(),
+          suggestCommand,
+        });
+        if (result.outcome === "healthy") {
+          console.log(`✅ Healthy. Predicted memory ratio: ${prediction.predictedMemory.toFixed(4)}`);
+        } else if (result.outcome === "escalated") {
+          console.error(`⚠️ CRITICAL: ${config.podName} is in CrashLoopBackOff; notify an administrator.`);
+        } else {
+          console.warn(`⚠️ Anomaly. Suggested command (not executed): ${result.command}`);
+        }
+      }
+    } catch (error) {
+      console.error(`[KubePulse] Poll failed: ${error.message}`);
     }
-    );
 
-    // python.stderr.on('data', (data) => {
-    //     console.error("Python STDERR:", data.toString());
-    // });
+    const remaining = config.pollIntervalMs - (Date.now() - startedAt);
+    if (!stopping && remaining > 0) await sleep(remaining);
+  }
+}
 
-    // python.stderr.on('error', (error) => {
-    //     console.error("Python error:", error);
-    // });
-
-    setInterval(async () => {
-        let memory = await queryPrometheus(`container_memory_usage_bytes{pod="${podName}"}`) || 0;
-        memory/= (1024*1024);
-        memory/=maxLimit;
-        memoryUsage.shift();
-       // console.log(memoryUsage,"shifted")
-        memoryUsage.push(memory);
-        console.log(memoryUsage,"updated mem")
-
-        python.stdin.write(JSON.stringify({ podName: podName, memoryUsage: memoryUsage }) + '\n');
-    }, 1000);
-
-}, 11000);
+main().catch((error) => {
+  console.error(`[KubePulse] Fatal: ${error.message}`);
+  process.exitCode = 1;
+});

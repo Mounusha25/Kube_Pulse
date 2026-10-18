@@ -186,11 +186,22 @@ kubectl proxy --port=8001
 
 ### 5. Configure the Target Pod
 
-In `index.js`, update the pod name to match your deployment:
+Configuration is supplied through environment variables; no source edit is
+required:
 
-```js
-const podName = "your-pod-name-here"
+```bash
+export KUBEPULSE_POD_NAME=your-pod-name
+export KUBEPULSE_NAMESPACE=default
+# Optional when a pod has multiple containers:
+export KUBEPULSE_CONTAINER_NAME=app
 ```
+
+The runtime accepts Kubernetes memory quantities such as `512Mi`, `1Gi`, and
+`500M`. Prometheus, Kubernetes proxy, exporter, polling, and timeout settings
+can also be overridden with `KUBEPULSE_PROMETHEUS_URL`,
+`KUBEPULSE_KUBE_API_URL`, `KUBEPULSE_EXPORTER_URL`,
+`KUBEPULSE_POLL_INTERVAL_MS`, `KUBEPULSE_REQUEST_TIMEOUT_MS`, and
+`KUBEPULSE_PREDICTION_TIMEOUT_MS`.
 
 ### 6. Run KubePulse
 
@@ -199,6 +210,16 @@ npm run dev
 ```
 
 KubePulse will begin collecting metrics. After 10 seconds of warm-up, ML predictions start streaming and anomaly detection goes live.
+
+### 7. Run the reliability tests
+
+```bash
+npm test
+```
+
+The tests cover Kubernetes quantity parsing and container selection,
+Prometheus response validation, structured ML output, and healthy, escalation,
+and LLM-suggestion routing. Suggested commands are logged but never executed.
 
 ---
 
