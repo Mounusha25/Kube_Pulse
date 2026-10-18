@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeguard-exporter
+  namespace: kubepulse-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubeguard-exporter
+  template:
+    metadata:
+      labels:
+        app: kubeguard-exporter
+    spec:
+      containers:
+        - name: exporter
+          image: kubeguard-exporter:dev
+          imagePullPolicy: Never
+          ports:
+            - name: metrics
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 2
+            periodSeconds: 3
+          resources:
+            requests:
+              cpu: 20m
+              memory: 24Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubeguard-exporter
+  namespace: kubepulse-lab
+  labels:
+    app: kubeguard-exporter
+spec:
+  selector:
+    app: kubeguard-exporter
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kubeguard-exporter
+  namespace: kubepulse-lab
+  labels:
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: kubeguard-exporter
+  endpoints:
+    - port: metrics
+      interval: 1s
+      honorLabels: true
+

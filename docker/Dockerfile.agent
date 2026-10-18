@@ -1,0 +1,34 @@
+FROM node:20-bookworm-slim AS node-runtime
+
+FROM python:3.12-slim
+
+ENV NODE_ENV=production \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY requirements.lock ./
+RUN python -m venv /opt/kubepulse-venv \
+    && /opt/kubepulse-venv/bin/pip install --no-cache-dir -r requirements.lock
+
+COPY index.js hybrid_predict.py ./
+COPY src ./src
+COPY ml ./ml
+COPY models/v2 ./models/v2
+
+ENV KUBEPULSE_PYTHON_BIN=/opt/kubepulse-venv/bin/python
+RUN useradd --create-home --uid 10001 kubepulse \
+    && chown -R kubepulse:kubepulse /app
+USER kubepulse
+ENTRYPOINT ["node", "index.js"]

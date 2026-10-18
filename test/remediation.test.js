@@ -37,3 +37,14 @@ test("recoverable anomalies produce a non-executed suggestion", async () => {
   assert.equal(result.outcome, "suggested");
   assert.match(result.command, /^kubectl set resources/);
 });
+
+test("remediation can be disabled without hiding anomaly detection", async () => {
+  const result = await routePrediction({
+    ...base,
+    prediction: { predictedMemory: 1.2, isAnomaly: 1 },
+    isCrashLooping: async () => false,
+    remediationEnabled: false,
+    suggestCommand: async () => assert.fail("should not be called"),
+  });
+  assert.deepEqual(result, { outcome: "detected", command: null });
+});

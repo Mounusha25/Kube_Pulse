@@ -1,0 +1,17 @@
+prometheus:
+  url: http://monitoring-kube-prometheus-prometheus.monitoring.svc
+  port: 9090
+
+rules:
+  default: false
+  external:
+    - seriesQuery: 'kubeguard_predicted_memory_ratio{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace:
+            resource: namespace
+      name:
+        matches: ^kubeguard_predicted_memory_ratio$
+        as: kubeguard_predicted_memory_ratio
+      metricsQuery: 'max(<<.Series>>{<<.LabelMatchers>>})'
+

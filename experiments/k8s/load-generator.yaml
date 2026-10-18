@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: load-generator-code
+  namespace: kubepulse-lab
+data:
+  load.py: |
+    import concurrent.futures
+    import os
+    import time
+    import urllib.request
+
+    url = os.getenv("TARGET_URL", "http://memory-workload:8080/work")
+    base = int(os.getenv("BASE_RPS", "2"))
+    maximum = int(os.getenv("MAX_RPS", "12"))
+    ramp_seconds = int(os.getenv("RAMP_SECONDS", "120"))
+    started = time.monotonic()
+
+    def request():
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response: response.read()
+        except Exception as error:
+            print(f"request failed: {error}", flush=True)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+        while True:
+            elapsed = time.monotonic() - started
+            rate = min(maximum, base + int((maximum - base) * elapsed / ramp_seconds))
+            for _ in range(rate): pool.submit(request)
+            print(f"elapsed={elapsed:.1f}s rps={rate}", flush=True)
+            time.sleep(1)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+  namespace: kubepulse-lab
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: load-generator
+  template:
+    metadata:
+      labels:
+        app: load-generator
+    spec:
+      containers:
+        - name: load-generator
+          image: python:3.12-slim
+          command: ["python", "/app/load.py"]
+          volumeMounts:
+            - name: code
+              mountPath: /app
+      volumes:
+        - name: code
+          configMap:
+            name: load-generator-code

@@ -16,7 +16,12 @@ export function loadConfig(env = process.env) {
     podName,
     namespace: env.KUBEPULSE_NAMESPACE?.trim() || "default",
     containerName: env.KUBEPULSE_CONTAINER_NAME?.trim() || null,
-    kubernetesApiUrl: (env.KUBEPULSE_KUBE_API_URL || "http://localhost:8001").replace(/\/$/, ""),
+    kubernetesApiUrl: (
+      env.KUBEPULSE_KUBE_API_URL ||
+      (env.KUBERNETES_SERVICE_HOST
+        ? `https://${env.KUBERNETES_SERVICE_HOST}:${env.KUBERNETES_SERVICE_PORT || "443"}`
+        : "http://localhost:8001")
+    ).replace(/\/$/, ""),
     prometheusUrl: (env.KUBEPULSE_PROMETHEUS_URL || "http://localhost:9090").replace(/\/$/, ""),
     exporterUrl: env.KUBEPULSE_EXPORTER_URL || "http://localhost:8080/report",
     pollIntervalMs: positiveInteger("KUBEPULSE_POLL_INTERVAL_MS", env.KUBEPULSE_POLL_INTERVAL_MS, 1000),
@@ -25,6 +30,9 @@ export function loadConfig(env = process.env) {
     predictionTimeoutMs: positiveInteger("KUBEPULSE_PREDICTION_TIMEOUT_MS", env.KUBEPULSE_PREDICTION_TIMEOUT_MS, 10000),
     pythonBin: env.KUBEPULSE_PYTHON_BIN || "python3",
     modelScript: env.KUBEPULSE_MODEL_SCRIPT || path.join(projectRoot, "hybrid_predict.py"),
+    serviceAccountTokenPath: env.KUBEPULSE_SA_TOKEN_PATH || "/var/run/secrets/kubernetes.io/serviceaccount/token",
+    serviceAccountCaPath: env.KUBEPULSE_SA_CA_PATH || "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+    remediationEnabled: env.KUBEPULSE_REMEDIATION_ENABLED === "true",
     projectRoot,
   };
 }

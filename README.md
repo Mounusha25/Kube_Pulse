@@ -1,22 +1,22 @@
-# 🛡️ KubePulse — Autonomous Kubernetes AI Monitoring Agent
+# 🛡️ KubePulse — Predictive Kubernetes AIOps Agent
 
 ![KubePulse Banner](./kubepulse_cover.png)
 
-> **Real-time pod anomaly detection and LLM-powered self-healing for Kubernetes workloads.**
+> **Real-time pod memory forecasting, anomaly detection, and predictive autoscaling for Kubernetes workloads.**
 
 [![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=flat&logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org/)
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go&logoColor=white)](https://golang.org/)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-API-326CE5?style=flat&logo=kubernetes&logoColor=white)](https://kubernetes.io/)
 [![Prometheus](https://img.shields.io/badge/Prometheus-Metrics-E6522C?style=flat&logo=prometheus&logoColor=white)](https://prometheus.io/)
 [![TensorFlow](https://img.shields.io/badge/TensorFlow-LSTM-FF6F00?style=flat&logo=tensorflow&logoColor=white)](https://tensorflow.org/)
-[![LangChain](https://img.shields.io/badge/LangChain-Gemini%201.5%20Pro-1C3C3C?style=flat)](https://langchain.com/)
+[![Gemini](https://img.shields.io/badge/Gemini-Optional%20SRE%20Suggestion-4285F4?style=flat&logo=google)](https://ai.google.dev/)
 
 ---
 
 ## Overview
 
-**KubePulse** is an autonomous AIOps agent that continuously monitors Kubernetes pod memory usage, predicts anomalies before they cause outages, and leverages a Large Language Model to automatically suggest remediation commands — all in real time.
+**KubePulse** is an AIOps agent that continuously monitors Kubernetes pod memory usage, predicts anomalies, exports forecasts to Prometheus, and makes those forecasts available to Kubernetes HPA through Prometheus Adapter. It can optionally ask a Large Language Model for a remediation suggestion; commands are logged for review and are never executed automatically.
 
 Traditional Kubernetes monitoring tools alert you *after* a problem occurs. KubePulse is **predictive**: it uses a hybrid LSTM + LightGBM ML pipeline to forecast memory behavior and detect anomalies before they escalate into `CrashLoopBackOff` or OOMKilled events.
 
@@ -36,7 +36,7 @@ Traditional Kubernetes monitoring tools alert you *after* a problem occurs. Kube
 │           │        POST     │            Anomaly? │             │
 │  ┌────────┴───────┐         │                     ▼             │
 │  │  Go Prometheus │◀────────┘         ┌───────────────────────┐ │
-│  │  Exporter      │  /report          │  Gemini 1.5 Pro (LLM) │ │
+│  │  Exporter      │  /report          │  Gemini API (optional)│ │
 │  │  /metrics      │                   │  kubectl fix command  │ │
 │  └────────────────┘                   └───────────────────────┘ │
 │  ┌──────────────┐                                               │
@@ -54,7 +54,7 @@ Traditional Kubernetes monitoring tools alert you *after* a problem occurs. Kube
 4. **ML Prediction** — The Node.js process streams the window to a Python subprocess via `stdin`; the LSTM model forecasts the next memory value
 5. **Anomaly Classification** — The predicted value is passed to a LightGBM classifier to determine if it's anomalous
 6. **Metrics Export** — Every prediction (healthy or anomalous) is POSTed to the **Go Prometheus Exporter** which exposes custom metrics on `/metrics` for Prometheus to scrape
-7. **LLM Remediation** — If an anomaly is detected, the agent queries **Gemini 1.5 Pro** with full pod context and gets a targeted `kubectl` fix command
+7. **Optional LLM Suggestion** — When explicitly enabled, an anomaly can be sent to the **Gemini API** for a proposed `kubectl` command; suggestions are never executed
 8. **Critical Triage** — If the pod is already in `CrashLoopBackOff`, the agent escalates to a cluster administrator alert instead of auto-remediating
 
 ---
@@ -100,8 +100,27 @@ and `0.0424` for persistence. Full machine-readable and Markdown reports are
 stored under `benchmarks/results/`.
 
 These are controlled synthetic workload results for regression and architecture
-validation—not measurements from a production Kubernetes cluster. Milestone 3
-adds the real-cluster HPA comparison.
+validation—not measurements from a production Kubernetes cluster. The next
+section reports the separate real-cluster HPA experiment.
+
+### Real Minikube HPA comparison
+
+The repository also contains an end-to-end Minikube experiment with a real
+StatefulSet, distributed ramp load, Metrics Server, Prometheus Operator,
+Prometheus Adapter, the containerized KubePulse agent, and its Go exporter.
+
+| Policy | First scale | Peak replicas | Replica-seconds | Failed requests | Restarts/OOMs |
+|---|---:|---:|---:|---:|---:|
+| Standard memory HPA | 75.03s | 4 | 255 | 0 | 0 / 0 |
+| KubePulse predictive HPA | **45.08s** | 6 | 555 | 0 | 0 / 0 |
+
+KubePulse scaled **29.95 seconds earlier** in this run. It also overprovisioned
+relative to the standard policy, consuming 300 additional replica-seconds. That
+tradeoff is reported explicitly: the current experiment establishes that the
+forecast can close the Prometheus-to-HPA loop, while threshold calibration and
+repeated trials remain necessary before production use. Raw samples and the
+machine-readable summary live in `experiments/results/cluster/`; see
+[`experiments/README.md`](experiments/README.md) for reproduction steps.
 
 ---
 
@@ -109,15 +128,15 @@ adds the real-cluster HPA comparison.
 
 | Layer | Technology |
 |-------|-----------|
-| **Orchestration** | Node.js (ESM), Express |
-| **Kubernetes Integration** | Kubernetes REST API (`kubectl proxy`) |
+| **Orchestration** | Node.js (ESM) |
+| **Kubernetes Integration** | Kubernetes REST API (in-cluster service account or local proxy) |
 | **Metrics** | Prometheus + PromQL |
 | **Custom Metrics Exporter** | Go 1.22, Prometheus `client_golang` SDK |
 | **ML Inference** | TensorFlow/Keras (LSTM), LightGBM, NumPy |
-| **LLM Integration** | LangChain + Google Gemini 1.5 Pro |
+| **LLM Integration** | Optional Google Gemini HTTPS API |
 | **IPC** | Node.js `child_process` → Python subprocess via `stdin/stdout` |
 | **Containerization** | Docker (multi-stage build) |
-| **Deployment** | Kubernetes Deployment + Service YAML |
+| **Deployment** | Docker, Kubernetes, Helm, Prometheus Operator/Adapter |
 
 ---
 
@@ -127,17 +146,16 @@ adds the real-cluster HPA comparison.
 KubePulse/
 ├── index.js                        # Main agent: metrics collection, orchestration, LLM integration
 ├── hybrid_predict.py               # ML inference engine: LSTM + LightGBM anomaly detection
-├── hybrid_lstm_model.keras         # Pre-trained LSTM model (TensorFlow/Keras)
-├── hybrid_lstm_model.h5            # LSTM model (HDF5 format)
-├── lightgbm_anomaly.pkl            # Trained LightGBM anomaly classifier
 ├── ml/                              # Deterministic data, training, evaluation, quality gate
 ├── data/kubepulse_benchmark.csv     # Versioned 14,400-row benchmark dataset
 ├── models/v2/                       # Reproducible LSTM, LightGBM, and metadata
 ├── benchmarks/results/              # JSON and Markdown benchmark reports
+├── experiments/                     # Minikube workloads, HPAs, raw samples, report
+├── docker/Dockerfile.agent          # Node 20 + Python 3.12 inference image
+├── scripts/setup_minikube_experiment.sh
 ├── tests_py/                        # Dataset and feature-pipeline tests
-├── exp.js                          # Utility: K8s API exploration script
 ├── package.json                    # Node.js dependencies
-└── kubepulse-exporter/             # Go Prometheus custom metrics exporter
+└── kubeguard-exporter/              # Go Prometheus custom metrics exporter
     ├── main.go                     # HTTP server exposing /report and /metrics
     ├── go.mod                      # Go module definition
     ├── Dockerfile                  # Multi-stage Docker build
@@ -147,7 +165,7 @@ KubePulse/
 
 ---
 
-## Go Prometheus Exporter (`kubepulse-exporter`)
+## Go Prometheus Exporter (`kubeguard-exporter`)
 
 A purpose-built Go microservice that acts as the **metrics bridge** between the KubePulse agent and Prometheus.
 
@@ -163,27 +181,27 @@ A purpose-built Go microservice that acts as the **metrics bridge** between the 
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `kubepulse_predicted_memory_ratio` | Gauge | LSTM-forecasted memory usage (0–1, per pod label) |
-| `kubepulse_anomaly_detected` | Gauge | 1 = anomaly active, 0 = healthy (per pod label) |
-| `kubepulse_anomalies_total` | Counter | Cumulative anomaly count since exporter start |
+| `kubeguard_predicted_memory_ratio` | Gauge | LSTM-forecasted memory ratio, labeled by namespace and pod |
+| `kubeguard_anomaly_detected` | Gauge | 1 = anomaly active, 0 = healthy |
+| `kubeguard_anomalies_total` | Counter | Cumulative anomaly detections since exporter start |
 
 ### Deploy the Exporter
 
 ```bash
 # Build the Docker image
-cd kubepulse-exporter
-docker build -t kubepulse-exporter:latest .
+cd kubeguard-exporter
+docker build -t kubeguard-exporter:latest .
 
 # Deploy to Kubernetes
 kubectl apply -f k8s/exporter-deployment.yaml
 
 # Verify it's running
-kubectl get pods -l app=kubepulse-exporter
+kubectl get pods -l app=kubeguard-exporter
 ```
 
 ### HPA Integration (Horizontal Pod Autoscaler)
 
-Since KubePulse exposes `kubepulse_predicted_memory_ratio` as a real Prometheus metric, Kubernetes HPA can use it via the [Prometheus Adapter](https://github.com/kubernetes-sigs/prometheus-adapter) to **auto-scale workloads** based on predicted memory — closing the full AIOps loop.
+KubePulse exposes `kubeguard_predicted_memory_ratio` as a Prometheus metric. The included Prometheus Adapter rule and predictive HPA consume it to scale the experiment workload, closing the full metrics-to-scaling loop.
 
 ---
 
@@ -193,9 +211,9 @@ Since KubePulse exposes `kubepulse_predicted_memory_ratio` as a real Prometheus 
 
 - Kubernetes cluster running locally (e.g., [minikube](https://minikube.sigs.k8s.io/) or [kind](https://kind.sigs.k8s.io/))
 - Prometheus deployed in the cluster with `container_memory_usage_bytes` metrics available
-- Python 3.10+ with pip
+- Python 3.12+ with pip
 - Node.js 20+
-- `kubectl proxy` running on `localhost:8001`
+- `kubectl proxy` running on `localhost:8001` for local execution (not needed in-cluster)
 
 ### 1. Clone the Repository
 
@@ -241,6 +259,11 @@ can also be overridden with `KUBEPULSE_PROMETHEUS_URL`,
 `KUBEPULSE_POLL_INTERVAL_MS`, `KUBEPULSE_REQUEST_TIMEOUT_MS`, and
 `KUBEPULSE_PREDICTION_TIMEOUT_MS`.
 
+LLM remediation suggestions are disabled by default. Set
+`KUBEPULSE_REMEDIATION_ENABLED=true`, `GOOGLE_API_KEY`, and
+`KUBEPULSE_GEMINI_MODEL` only if you want suggestions; KubePulse still never
+executes the returned command.
+
 ### 6. Run KubePulse
 
 ```bash
@@ -255,9 +278,19 @@ KubePulse will begin collecting metrics. After 10 seconds of warm-up, ML predict
 npm test
 ```
 
-The tests cover Kubernetes quantity parsing and container selection,
+The 19 Node tests cover Kubernetes quantity parsing and container selection,
 Prometheus response validation, structured ML output, and healthy, escalation,
-and LLM-suggestion routing. Suggested commands are logged but never executed.
+LLM-suggestion routing, and Gemini request safety. Suggested commands are logged
+but never executed.
+
+### Run the real-cluster experiment
+
+With Docker Desktop running:
+
+```bash
+./scripts/setup_minikube_experiment.sh
+python3 experiments/run_cluster_comparison.py --duration 150 --interval 5
+```
 
 ---
 
@@ -283,7 +316,7 @@ and LLM-suggestion routing. Suggested commands are logged but never executed.
 |----------|-----------------|-----------------|-----------------|
 | Threshold alerts | After breach | High | ❌ |
 | Prometheus alerting rules | After breach | Medium | ❌ |
-| **KubePulse (LSTM + LightGBM)** | **Before breach** | **Low** | **✅ LLM-powered** |
+| **KubePulse (LSTM + LightGBM)** | **Forecast-driven** | **Measured by benchmark** | **Human-reviewed suggestion** |
 
 ---
 
@@ -292,7 +325,7 @@ and LLM-suggestion routing. Suggested commands are logged but never executed.
 - **Subprocess IPC over REST** — The Python ML engine runs as a persistent subprocess rather than a separate microservice, eliminating HTTP overhead for high-frequency (1 Hz) inference
 - **Go for the metrics layer** — The exporter is written in Go using the official `prometheus/client_golang` SDK — the same stack used by production K8s operators — keeping the scrape path lightweight and idiomatic
 - **Normalized memory inputs** — Memory is normalized against each pod's individual limit, making the model portable across pods with different memory configurations
-- **LLM-as-last-resort** — The LLM is only invoked on confirmed anomalies, keeping API costs minimal while providing intelligent, context-aware remediation
+- **LLM opt-in** — LLM suggestions are disabled by default, invoked only on confirmed anomalies when enabled, and never executed by the agent
 - **CrashLoopBackOff triage** — Distinguishes between recoverable anomalies (auto-fix) and critical failures (human escalation), avoiding dangerous automated actions on already-failing pods
 
 ---
@@ -303,6 +336,7 @@ and LLM-suggestion routing. Suggested commands are logged but never executed.
 - [ ] CPU usage anomaly detection alongside memory
 - [ ] Slack/PagerDuty integration for critical alerts
 - [ ] Automatic execution of LLM-suggested commands (with approval workflow)
+- [ ] Tune the predictive HPA threshold across repeated real-cluster trials
 - [ ] Grafana dashboard for real-time anomaly visualization
 - [ ] Model retraining pipeline on new cluster data
 

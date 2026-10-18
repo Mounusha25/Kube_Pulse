@@ -1,7 +1,8 @@
 import axios from "axios";
-import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 
 import { loadConfig } from "./src/config.js";
+import { suggestCommandWithGemini } from "./src/gemini.js";
+import { createKubernetesHttpClient } from "./src/http.js";
 import { KubernetesClient } from "./src/kubernetes.js";
 import { buildMemoryQuery, PrometheusClient } from "./src/prometheus.js";
 import { PredictionEngine } from "./src/prediction-engine.js";
@@ -10,24 +11,20 @@ import { routePrediction } from "./src/remediation.js";
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 async function suggestCommand({ podName, predictedMemory, memoryLimitBytes }) {
-  const chat = new ChatGoogleGenerativeAI({ model: "gemini-1.5-pro", temperature: 0, maxRetries: 2 });
-  const response = await chat.invoke([
-    {
-      role: "system",
-      content: "You are a Kubernetes SRE assistant. Return one suggested kubectl command only. Never execute it.",
-    },
-    {
-      role: "user",
-      content: `Pod ${podName} has predicted memory ratio ${predictedMemory.toFixed(4)} and a ${memoryLimitBytes}-byte limit. Suggest one kubectl command to mitigate the risk.`,
-    },
-  ]);
-  return String(response.content).trim();
+  return suggestCommandWithGemini({
+    httpClient: axios,
+    env: process.env,
+    podName,
+    predictedMemory,
+    memoryLimitBytes,
+  });
 }
 
 async function main() {
   const config = loadConfig();
+  const kubernetesHttpClient = createKubernetesHttpClient(axios, config);
   const kubernetes = new KubernetesClient({
-    httpClient: axios,
+    httpClient: kubernetesHttpClient,
     baseUrl: config.kubernetesApiUrl,
     namespace: config.namespace,
     podName: config.podName,
@@ -66,6 +63,7 @@ async function main() {
         try {
           await axios.post(config.exporterUrl, {
             podName: config.podName,
+            namespace: config.namespace,
             predictedMemory: prediction.predictedMemory,
             isAnomaly: prediction.isAnomaly,
           }, { timeout: config.requestTimeoutMs });
@@ -79,11 +77,14 @@ async function main() {
           memoryLimitBytes,
           isCrashLooping: () => kubernetes.isCrashLooping(),
           suggestCommand,
+          remediationEnabled: config.remediationEnabled,
         });
         if (result.outcome === "healthy") {
           console.log(`✅ Healthy. Predicted memory ratio: ${prediction.predictedMemory.toFixed(4)}`);
         } else if (result.outcome === "escalated") {
           console.error(`⚠️ CRITICAL: ${config.podName} is in CrashLoopBackOff; notify an administrator.`);
+        } else if (result.outcome === "detected") {
+          console.warn("⚠️ Anomaly detected. Automated remediation suggestions are disabled.");
         } else {
           console.warn(`⚠️ Anomaly. Suggested command (not executed): ${result.command}`);
         }

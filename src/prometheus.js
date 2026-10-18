@@ -3,9 +3,15 @@ function escapeLabel(value) {
 }
 
 export function buildMemoryQuery({ namespace, podName, containerName = null }) {
-  const labels = [`namespace="${escapeLabel(namespace)}"`, `pod="${escapeLabel(podName)}"`, 'container!=""', 'image!=""'];
-  if (containerName) labels.push(`container="${escapeLabel(containerName)}"`);
-  return `sum(container_memory_usage_bytes{${labels.join(",")}})`;
+  const podLabels = [`namespace="${escapeLabel(namespace)}"`, `pod="${escapeLabel(podName)}"`];
+  const selected = [...podLabels];
+  if (containerName) {
+    selected.push(`container="${escapeLabel(containerName)}"`);
+  } else {
+    selected.push('container!=""', 'image!=""');
+  }
+  const podLevel = [...podLabels, 'container=""'];
+  return `sum(container_memory_usage_bytes{${selected.join(",")}}) or sum(container_memory_usage_bytes{${podLevel.join(",")}})`;
 }
 
 export class PrometheusClient {

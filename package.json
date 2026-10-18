@@ -1,7 +1,7 @@
 {
   "name": "k8s_ai_agent",
   "version": "1.0.0",
-  "description": "",
+  "description": "Predictive Kubernetes memory anomaly detection and autoscaling agent",
   "license": "ISC",
   "author": "",
   "type": "module",
@@ -12,13 +12,6 @@
     "dev": "node index.js"
   },
   "dependencies": {
-    "@langchain/anthropic": "^0.3.18",
-    "@langchain/community": "^0.3.41",
-    "@langchain/core": "^0.3.45",
-    "@langchain/google-genai": "^0.2.4",
-    "@langchain/langgraph": "^0.2.64",
-    "@langchain/openai": "^0.5.5",
-    "axios": "^1.8.4",
-    "express": "^5.1.0"
+    "axios": "^1.20.0"
   }
 }

@@ -11,6 +11,7 @@ import (
 
 // MetricPayload is the JSON body sent by the Node.js agent
 type MetricPayload struct {
+	Namespace       string  `json:"namespace"`
 	PodName         string  `json:"podName"`
 	PredictedMemory float64 `json:"predictedMemory"`
 	IsAnomaly       int     `json:"isAnomaly"`
@@ -22,7 +23,7 @@ var (
 			Name: "kubeguard_predicted_memory_ratio",
 			Help: "LSTM-predicted memory usage ratio (0-1) relative to pod memory limit",
 		},
-		[]string{"pod"},
+		[]string{"namespace", "pod"},
 	)
 
 	anomalyGauge = prometheus.NewGaugeVec(
@@ -30,7 +31,7 @@ var (
 			Name: "kubeguard_anomaly_detected",
 			Help: "1 if an anomaly was detected for the pod, 0 otherwise",
 		},
-		[]string{"pod"},
+		[]string{"namespace", "pod"},
 	)
 
 	totalAnomaliesCounter = prometheus.NewCounterVec(
@@ -38,7 +39,7 @@ var (
 			Name: "kubeguard_anomalies_total",
 			Help: "Total number of anomalies detected per pod since exporter start",
 		},
-		[]string{"pod"},
+		[]string{"namespace", "pod"},
 	)
 )
 
@@ -60,11 +61,14 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	predictedMemoryGauge.WithLabelValues(payload.PodName).Set(payload.PredictedMemory)
-	anomalyGauge.WithLabelValues(payload.PodName).Set(float64(payload.IsAnomaly))
+	if payload.Namespace == "" {
+		payload.Namespace = "default"
+	}
+	predictedMemoryGauge.WithLabelValues(payload.Namespace, payload.PodName).Set(payload.PredictedMemory)
+	anomalyGauge.WithLabelValues(payload.Namespace, payload.PodName).Set(float64(payload.IsAnomaly))
 
 	if payload.IsAnomaly == 1 {
-		totalAnomaliesCounter.WithLabelValues(payload.PodName).Inc()
+		totalAnomaliesCounter.WithLabelValues(payload.Namespace, payload.PodName).Inc()
 	}
 
 	log.Printf("[KubeGuard Exporter] pod=%s predicted=%.4f anomaly=%d",

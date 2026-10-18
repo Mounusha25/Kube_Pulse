@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubepulse-agent
+  namespace: kubepulse-lab
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubepulse-pod-reader
+  namespace: kubepulse-lab
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubepulse-pod-reader
+  namespace: kubepulse-lab
+subjects:
+  - kind: ServiceAccount
+    name: kubepulse-agent
+    namespace: kubepulse-lab
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubepulse-pod-reader
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubepulse-agent
+  namespace: kubepulse-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubepulse-agent
+  template:
+    metadata:
+      labels:
+        app: kubepulse-agent
+    spec:
+      serviceAccountName: kubepulse-agent
+      containers:
+        - name: agent
+          image: kubepulse-agent:dev
+          imagePullPolicy: Never
+          env:
+            - name: KUBEPULSE_POD_NAME
+              value: memory-workload-0
+            - name: KUBEPULSE_NAMESPACE
+              value: kubepulse-lab
+            - name: KUBEPULSE_CONTAINER_NAME
+              value: app
+            - name: KUBEPULSE_PROMETHEUS_URL
+              value: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
+            - name: KUBEPULSE_EXPORTER_URL
+              value: http://kubeguard-exporter:8080/report
+            - name: KUBEPULSE_POLL_INTERVAL_MS
+              value: "1000"
+            - name: KUBEPULSE_WINDOW_SIZE
+              value: "10"
+            - name: KUBEPULSE_REMEDIATION_ENABLED
+              value: "false"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+

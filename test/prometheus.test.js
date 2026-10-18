@@ -5,7 +5,14 @@ import { buildMemoryQuery, PrometheusClient } from "../src/prometheus.js";
 test("builds an aggregate pod-memory query", () => {
   assert.equal(
     buildMemoryQuery({ namespace: "default", podName: "api", containerName: "web" }),
-    'sum(container_memory_usage_bytes{namespace="default",pod="api",container!="",image!="",container="web"})',
+    'sum(container_memory_usage_bytes{namespace="default",pod="api",container="web"}) or sum(container_memory_usage_bytes{namespace="default",pod="api",container=""})',
+  );
+});
+
+test("falls back to pod-level cAdvisor metrics when container labels are absent", () => {
+  assert.equal(
+    buildMemoryQuery({ namespace: "lab", podName: "worker" }),
+    'sum(container_memory_usage_bytes{namespace="lab",pod="worker",container!="",image!=""}) or sum(container_memory_usage_bytes{namespace="lab",pod="worker",container=""})',
   );
 });
 
