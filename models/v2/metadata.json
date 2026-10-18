@@ -1,0 +1,21 @@
+{
+  "seed": 20261018,
+  "window_size": 10,
+  "horizon_seconds": 10,
+  "forecast_target": "next_ratio_delta",
+  "classifier_features": [
+    "lstm_forecast",
+    "current_ratio",
+    "linear_forecast_5",
+    "mean_5",
+    "std_5",
+    "max_5",
+    "last_delta"
+  ],
+  "decision_threshold": 0.95,
+  "train_examples": 8400,
+  "validation_examples": 2880,
+  "epochs_completed": 16,
+  "final_train_mae": 0.017481587827205658,
+  "final_validation_mae": 0.017134753987193108
+}

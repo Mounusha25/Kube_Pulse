@@ -65,10 +65,43 @@ Traditional Kubernetes monitoring tools alert you *after* a problem occurs. Kube
 
 | Component | Role | Details |
 |-----------|------|---------|
-| **LSTM** | Time-series forecasting | Trained on historical pod memory sequences (10-step input → next value) |
+| **LSTM** | Time-series forecasting | Trained reproducibly on versioned workload traces (10-step input → next value) |
 | **LightGBM** | Anomaly classification | Binary classifier on LSTM-predicted output: `0` = healthy, `1` = anomaly |
 
 The **hybrid approach** separates concerns: LSTM captures temporal patterns in memory usage while LightGBM provides fast, interpretable anomaly classification on top of the forecast — a design that reduces false positives compared to threshold-based alerting.
+
+### Reproducible benchmark
+
+The v2 model is trained and evaluated with one command on deterministic normal,
+burst, gradual-leak, and oscillating workload traces:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.lock
+python -m ml.run_benchmark
+python -m ml.validate_results
+```
+
+The benchmark uses chronological 60/20/20 splits with no shuffled future
+samples. A positive label means memory reaches its configured limit within the
+next 10 seconds. On the fixed 14,400-row benchmark (24 traces, 2,640 held-out
+examples), the current results are:
+
+| Method | F1 | PR-AUC | False-alert rate | Breach-event recall | Mean warning |
+|---|---:|---:|---:|---:|---:|
+| Static threshold (0.85) | 0.757 | 0.849 | 6.39% | 100% | 6.11s |
+| Prometheus-style 0.90 for 3 samples | 0.753 | 0.808 | 3.86% | 68.4% | 6.46s |
+| Linear trend (5 samples) | 0.802 | 0.874 | 4.44% | 100% | 6.26s |
+| **LSTM + LightGBM v2** | **0.839** | **0.881** | **2.13%** | **100%** | **5.84s** |
+
+The LSTM forecast reaches `0.0201` MAE and `0.0397` RMSE, versus `0.0215`
+and `0.0424` for persistence. Full machine-readable and Markdown reports are
+stored under `benchmarks/results/`.
+
+These are controlled synthetic workload results for regression and architecture
+validation—not measurements from a production Kubernetes cluster. Milestone 3
+adds the real-cluster HPA comparison.
 
 ---
 
@@ -97,6 +130,11 @@ KubePulse/
 ├── hybrid_lstm_model.keras         # Pre-trained LSTM model (TensorFlow/Keras)
 ├── hybrid_lstm_model.h5            # LSTM model (HDF5 format)
 ├── lightgbm_anomaly.pkl            # Trained LightGBM anomaly classifier
+├── ml/                              # Deterministic data, training, evaluation, quality gate
+├── data/kubepulse_benchmark.csv     # Versioned 14,400-row benchmark dataset
+├── models/v2/                       # Reproducible LSTM, LightGBM, and metadata
+├── benchmarks/results/              # JSON and Markdown benchmark reports
+├── tests_py/                        # Dataset and feature-pipeline tests
 ├── exp.js                          # Utility: K8s API exploration script
 ├── package.json                    # Node.js dependencies
 └── kubepulse-exporter/             # Go Prometheus custom metrics exporter

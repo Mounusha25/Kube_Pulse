@@ -1,0 +1,94 @@
+{
+  "benchmark_version": "1.0",
+  "environment": {
+    "python": "3.12.13",
+    "platform": "macOS-26.6.2-arm64-arm-64bit"
+  },
+  "dataset": {
+    "path": "data/kubepulse_benchmark.csv",
+    "rows": 14400,
+    "traces": 24,
+    "test_examples": 2640,
+    "positive_test_examples": 388
+  },
+  "forecasting": {
+    "persistence": {
+      "mae": 0.021485796198248863,
+      "rmse": 0.04244036535416491
+    },
+    "moving_average_5": {
+      "mae": 0.042372915893793106,
+      "rmse": 0.08267094472935994
+    },
+    "linear_trend_5": {
+      "mae": 0.02108173444867134,
+      "rmse": 0.04221925362783188
+    },
+    "lstm_v2": {
+      "mae": 0.020060187205672264,
+      "rmse": 0.0396856434079944
+    }
+  },
+  "classification": {
+    "static_threshold_0.85": {
+      "accuracy": 0.9212121212121213,
+      "precision": 0.6923076923076923,
+      "recall": 0.8350515463917526,
+      "f1": 0.7570093457943925,
+      "pr_auc": 0.848504042316038,
+      "false_alert_rate": 0.06394316163410302,
+      "lead_time": {
+        "breach_events": 19,
+        "detected_events": 19,
+        "event_recall": 1.0,
+        "mean_warning_seconds": 6.105263157894737,
+        "median_warning_seconds": 9.0
+      }
+    },
+    "prometheus_0.90_for_3": {
+      "accuracy": 0.9287878787878788,
+      "precision": 0.767379679144385,
+      "recall": 0.7396907216494846,
+      "f1": 0.7532808398950132,
+      "pr_auc": 0.8076822637216093,
+      "false_alert_rate": 0.038632326820603906,
+      "lead_time": {
+        "breach_events": 19,
+        "detected_events": 13,
+        "event_recall": 0.6842105263157895,
+        "mean_warning_seconds": 6.461538461538462,
+        "median_warning_seconds": 7.0
+      }
+    },
+    "linear_trend_5": {
+      "accuracy": 0.9390151515151515,
+      "precision": 0.765807962529274,
+      "recall": 0.8427835051546392,
+      "f1": 0.8024539877300614,
+      "pr_auc": 0.8737661040289103,
+      "false_alert_rate": 0.04440497335701599,
+      "lead_time": {
+        "breach_events": 19,
+        "detected_events": 19,
+        "event_recall": 1.0,
+        "mean_warning_seconds": 6.2631578947368425,
+        "median_warning_seconds": 8.0
+      }
+    },
+    "hybrid_lstm_lightgbm_v2": {
+      "accuracy": 0.9541666666666667,
+      "precision": 0.8677685950413223,
+      "recall": 0.8118556701030928,
+      "f1": 0.8388814913448736,
+      "pr_auc": 0.8807691384814039,
+      "false_alert_rate": 0.021314387211367674,
+      "lead_time": {
+        "breach_events": 19,
+        "detected_events": 19,
+        "event_recall": 1.0,
+        "mean_warning_seconds": 5.842105263157895,
+        "median_warning_seconds": 6.0
+      }
+    }
+  }
+}
