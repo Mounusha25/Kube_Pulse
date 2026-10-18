@@ -2,16 +2,16 @@
 
 This experiment compares the standard Kubernetes memory HPA with a predictive
 HPA driven by KubePulse's `kubeguard_predicted_memory_ratio` metric. Both trials
-use the same StatefulSet, deterministic ramp load, replica limits, and 150-second
+use the same Deployment, deterministic ramp load, replica limits, and 150-second
 measurement window.
 
 ## Stack
 
 - Minikube and Metrics Server
 - kube-prometheus-stack and Prometheus Adapter
-- KubePulse Node/Python agent running the versioned LSTM + LightGBM artifacts
+- KubePulse Node/Python agent with label-based pod discovery and independent windows
 - Go prediction exporter and `ServiceMonitor`
-- Stateful memory workload and distributed ramp load generator
+- Deployment-based memory workload and distributed ramp load generator
 
 The setup uses in-cluster service-account authentication and namespace-scoped
 read-only RBAC. LLM remediation is disabled during measurement.
@@ -26,9 +26,10 @@ python3 experiments/run_cluster_comparison.py --duration 150 --interval 5
 ```
 
 The runner refuses to operate unless the active context is `minikube`. Before
-each trial it removes both HPAs, stops the load generator, converges to exactly
-one ready workload pod, recreates that pod, and restarts the agent to clear its
-sliding window.
+each trial it removes both HPAs, fully stops the load generator, converges to
+one ready workload pod, recreates it with a unique Deployment pod identity,
+allows old metrics to expire, and restarts both exporter and agent. These steps
+prevent state or stale Prometheus samples from leaking between policies.
 
 Outputs are written to `experiments/results/cluster/`:
 
@@ -38,12 +39,13 @@ Outputs are written to `experiments/results/cluster/`:
 
 ## Recorded result
 
-On the checked-in run, predictive scaling began **29.95 seconds earlier** than
-the standard HPA (45.08s versus 75.03s). Both trials recorded zero request
-failures, restarts, and OOM events. The predictive policy also consumed more
-capacity—555 versus 255 replica-seconds and a peak of six versus four replicas.
+On the checked-in run, predictive scaling began **60.12 seconds earlier** than
+the standard HPA (15.02s versus 75.14s). Both trials recorded zero request
+failures, restarts, and OOM events, and both peaked at four replicas. The
+predictive policy consumed more capacity—405 versus 255 replica-seconds.
 
-That cost is deliberately reported: the result demonstrates earlier response,
-not a claim that the current threshold is cost-optimal. Production use would
-require tuning on representative cluster traffic and repeated statistical runs.
+That cost is deliberately reported: the result demonstrates earlier response
+and correct per-pod custom-metric scaling, not a claim that the `350m` target is
+cost-optimal. Production use would require representative traffic and repeated
+statistical trials.
 

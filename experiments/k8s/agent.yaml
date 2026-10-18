@@ -49,8 +49,8 @@ spec:
           image: kubepulse-agent:dev
           imagePullPolicy: Never
           env:
-            - name: KUBEPULSE_POD_NAME
-              value: memory-workload-0
+            - name: KUBEPULSE_POD_SELECTOR
+              value: app=memory-workload
             - name: KUBEPULSE_NAMESPACE
               value: kubepulse-lab
             - name: KUBEPULSE_CONTAINER_NAME

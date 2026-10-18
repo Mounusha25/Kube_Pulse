@@ -4,14 +4,16 @@ prometheus:
 
 rules:
   default: false
-  external:
+  custom:
     - seriesQuery: 'kubeguard_predicted_memory_ratio{namespace!="",pod!=""}'
       resources:
         overrides:
           namespace:
             resource: namespace
+          pod:
+            resource: pod
       name:
         matches: ^kubeguard_predicted_memory_ratio$
         as: kubeguard_predicted_memory_ratio
-      metricsQuery: 'max(<<.Series>>{<<.LabelMatchers>>})'
+      metricsQuery: 'max(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'
 

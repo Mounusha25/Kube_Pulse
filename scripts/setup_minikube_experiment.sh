@@ -28,8 +28,9 @@ helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapte
 minikube image build -t kubepulse-agent:dev -f docker/Dockerfile.agent .
 minikube image build -t kubeguard-exporter:dev kubeguard-exporter
 
+kubectl delete statefulset/memory-workload -n kubepulse-lab --ignore-not-found
 kubectl apply -k experiments/k8s
-kubectl rollout status statefulset/memory-workload -n kubepulse-lab --timeout=3m
+kubectl rollout status deployment/memory-workload -n kubepulse-lab --timeout=3m
 kubectl rollout status deployment/kubeguard-exporter -n kubepulse-lab --timeout=3m
 kubectl rollout status deployment/kubepulse-agent -n kubepulse-lab --timeout=5m
 

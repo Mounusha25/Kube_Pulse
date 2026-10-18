@@ -31,12 +31,11 @@ data:
     ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
 ---
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: memory-workload
   namespace: kubepulse-lab
 spec:
-  serviceName: memory-workload
   replicas: 1
   selector:
     matchLabels:

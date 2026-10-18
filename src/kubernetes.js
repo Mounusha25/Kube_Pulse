@@ -18,31 +18,47 @@ export function parseMemoryQuantityToBytes(quantity) {
 }
 
 export class KubernetesClient {
-  constructor({ httpClient, baseUrl, namespace, podName, containerName = null, timeoutMs = 5000 }) {
-    Object.assign(this, { httpClient, baseUrl, namespace, podName, containerName, timeoutMs });
+  constructor({ httpClient, baseUrl, namespace, podName = null, podSelector = null, containerName = null, timeoutMs = 5000 }) {
+    Object.assign(this, { httpClient, baseUrl, namespace, podName, podSelector, containerName, timeoutMs });
   }
 
-  async getPod() {
+  async getPod(podName = this.podName) {
+    if (!podName) throw new Error("A pod name is required");
     const namespace = encodeURIComponent(this.namespace);
-    const pod = encodeURIComponent(this.podName);
+    const pod = encodeURIComponent(podName);
     const response = await this.httpClient.get(`${this.baseUrl}/api/v1/namespaces/${namespace}/pods/${pod}`, { timeout: this.timeoutMs });
     return response.data;
   }
 
-  selectContainer(pod) {
+  async listPods() {
+    if (this.podName) return [await this.getPod(this.podName)];
+    if (!this.podSelector) throw new Error("A pod name or selector is required");
+    const namespace = encodeURIComponent(this.namespace);
+    const response = await this.httpClient.get(`${this.baseUrl}/api/v1/namespaces/${namespace}/pods`, {
+      params: { labelSelector: this.podSelector },
+      timeout: this.timeoutMs,
+    });
+    return (response.data?.items || []).filter((pod) => !pod?.metadata?.deletionTimestamp);
+  }
+
+  selectContainer(pod, podName = pod?.metadata?.name || this.podName) {
     const containers = pod?.spec?.containers || [];
     const container = this.containerName ? containers.find((item) => item.name === this.containerName) : containers[0];
-    if (!container) throw new Error(`Pod ${this.podName} has no matching container`);
+    if (!container) throw new Error(`Pod ${podName || "<unknown>"} has no matching container`);
     return container;
   }
 
-  async getMemoryLimitBytes() {
-    const container = this.selectContainer(await this.getPod());
+  getMemoryLimitBytesFromPod(pod) {
+    const container = this.selectContainer(pod);
     return parseMemoryQuantityToBytes(container?.resources?.limits?.memory);
   }
 
-  async isCrashLooping() {
-    const pod = await this.getPod();
+  async getMemoryLimitBytes(podName = this.podName) {
+    return this.getMemoryLimitBytesFromPod(await this.getPod(podName));
+  }
+
+  async isCrashLooping(podName = this.podName) {
+    const pod = await this.getPod(podName);
     const statuses = pod?.status?.containerStatuses || [];
     const status = this.containerName ? statuses.find((item) => item.name === this.containerName) : statuses[0];
     return status?.state?.waiting?.reason === "CrashLoopBackOff";

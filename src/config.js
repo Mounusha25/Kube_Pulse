@@ -11,9 +11,16 @@ function positiveInteger(name, rawValue, fallback) {
 
 export function loadConfig(env = process.env) {
   const podName = env.KUBEPULSE_POD_NAME?.trim();
-  if (!podName) throw new Error("KUBEPULSE_POD_NAME is required");
+  const podSelector = env.KUBEPULSE_POD_SELECTOR?.trim();
+  if (!podName && !podSelector) {
+    throw new Error("KUBEPULSE_POD_NAME or KUBEPULSE_POD_SELECTOR is required");
+  }
+  if (podName && podSelector) {
+    throw new Error("Set only one of KUBEPULSE_POD_NAME or KUBEPULSE_POD_SELECTOR");
+  }
   return {
-    podName,
+    podName: podName || null,
+    podSelector: podSelector || null,
     namespace: env.KUBEPULSE_NAMESPACE?.trim() || "default",
     containerName: env.KUBEPULSE_CONTAINER_NAME?.trim() || null,
     kubernetesApiUrl: (

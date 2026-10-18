@@ -4,9 +4,9 @@ import { loadConfig } from "./src/config.js";
 import { suggestCommandWithGemini } from "./src/gemini.js";
 import { createKubernetesHttpClient } from "./src/http.js";
 import { KubernetesClient } from "./src/kubernetes.js";
-import { buildMemoryQuery, PrometheusClient } from "./src/prometheus.js";
+import { MultiPodMonitor } from "./src/monitor.js";
+import { PrometheusClient } from "./src/prometheus.js";
 import { PredictionEngine } from "./src/prediction-engine.js";
-import { routePrediction } from "./src/remediation.js";
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -28,14 +28,24 @@ async function main() {
     baseUrl: config.kubernetesApiUrl,
     namespace: config.namespace,
     podName: config.podName,
+    podSelector: config.podSelector,
     containerName: config.containerName,
     timeoutMs: config.requestTimeoutMs,
   });
   const prometheus = new PrometheusClient({ httpClient: axios, baseUrl: config.prometheusUrl, timeoutMs: config.requestTimeoutMs });
   const engine = new PredictionEngine({ pythonBin: config.pythonBin, scriptPath: config.modelScript, cwd: config.projectRoot });
-  const memoryQuery = buildMemoryQuery(config);
-  const memoryLimitBytes = await kubernetes.getMemoryLimitBytes();
-  const window = [];
+  const monitor = new MultiPodMonitor({
+    kubernetes,
+    prometheus,
+    engine,
+    reporter: (payload) => axios.post(config.exporterUrl, payload, { timeout: config.requestTimeoutMs }),
+    suggestCommand,
+    namespace: config.namespace,
+    containerName: config.containerName,
+    windowSize: config.windowSize,
+    predictionTimeoutMs: config.predictionTimeoutMs,
+    remediationEnabled: config.remediationEnabled,
+  });
   let stopping = false;
 
   const stop = () => {
@@ -45,50 +55,13 @@ async function main() {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
 
-  console.log(`[KubePulse] Monitoring ${config.namespace}/${config.podName} every ${config.pollIntervalMs} ms`);
+  const target = config.podSelector ? `selector ${config.podSelector}` : `pod ${config.podName}`;
+  console.log(`[KubePulse] Monitoring ${config.namespace} ${target} every ${config.pollIntervalMs} ms`);
   while (!stopping) {
     const startedAt = Date.now();
     try {
-      const memoryBytes = await prometheus.queryScalar(memoryQuery);
-      window.push(memoryBytes / memoryLimitBytes);
-      if (window.length > config.windowSize) window.shift();
-
-      if (window.length < config.windowSize) {
-        console.log(`[KubePulse] Warm-up ${window.length}/${config.windowSize}`);
-      } else {
-        const prediction = await engine.predict(
-          { podName: config.podName, memoryUsage: window },
-          config.predictionTimeoutMs,
-        );
-        try {
-          await axios.post(config.exporterUrl, {
-            podName: config.podName,
-            namespace: config.namespace,
-            predictedMemory: prediction.predictedMemory,
-            isAnomaly: prediction.isAnomaly,
-          }, { timeout: config.requestTimeoutMs });
-        } catch (error) {
-          console.error(`[Exporter] Prediction could not be reported: ${error.message}`);
-        }
-
-        const result = await routePrediction({
-          prediction,
-          podName: config.podName,
-          memoryLimitBytes,
-          isCrashLooping: () => kubernetes.isCrashLooping(),
-          suggestCommand,
-          remediationEnabled: config.remediationEnabled,
-        });
-        if (result.outcome === "healthy") {
-          console.log(`✅ Healthy. Predicted memory ratio: ${prediction.predictedMemory.toFixed(4)}`);
-        } else if (result.outcome === "escalated") {
-          console.error(`⚠️ CRITICAL: ${config.podName} is in CrashLoopBackOff; notify an administrator.`);
-        } else if (result.outcome === "detected") {
-          console.warn("⚠️ Anomaly detected. Automated remediation suggestions are disabled.");
-        } else {
-          console.warn(`⚠️ Anomaly. Suggested command (not executed): ${result.command}`);
-        }
-      }
+      const targets = await monitor.poll();
+      if (targets === 0) console.warn(`[KubePulse] No pods match ${target}`);
     } catch (error) {
       console.error(`[KubePulse] Poll failed: ${error.message}`);
     }

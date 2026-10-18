@@ -3,7 +3,17 @@ import assert from "node:assert/strict";
 import { loadConfig } from "../src/config.js";
 
 test("requires a target pod", () => {
-  assert.throws(() => loadConfig({}), /KUBEPULSE_POD_NAME is required/);
+  assert.throws(() => loadConfig({}), /KUBEPULSE_POD_NAME or KUBEPULSE_POD_SELECTOR is required/);
+  assert.throws(
+    () => loadConfig({ KUBEPULSE_POD_NAME: "api", KUBEPULSE_POD_SELECTOR: "app=api" }),
+    /Set only one/,
+  );
+});
+
+test("supports label-based multi-pod discovery", () => {
+  const config = loadConfig({ KUBEPULSE_POD_SELECTOR: "app=checkout" });
+  assert.equal(config.podName, null);
+  assert.equal(config.podSelector, "app=checkout");
 });
 
 test("loads safe defaults and validates timing values", () => {

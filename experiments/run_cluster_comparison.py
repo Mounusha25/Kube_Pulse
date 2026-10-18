@@ -47,10 +47,10 @@ def quantity_to_mib(value: str) -> float:
 
 
 def workload_state() -> dict[str, Any]:
-    statefulset = json.loads(kubectl("get", "statefulset/memory-workload", "-n", NAMESPACE, "-o", "json"))
+    deployment = json.loads(kubectl("get", "deployment/memory-workload", "-n", NAMESPACE, "-o", "json"))
     pods = json.loads(kubectl("get", "pods", "-n", NAMESPACE, "-l", "app=memory-workload", "-o", "json"))
-    desired = int(statefulset.get("spec", {}).get("replicas", 0))
-    ready = int(statefulset.get("status", {}).get("readyReplicas", 0))
+    desired = int(deployment.get("spec", {}).get("replicas", 0))
+    ready = int(deployment.get("status", {}).get("readyReplicas", 0))
     restarts = 0
     oom_events = 0
     for pod in pods.get("items", []):
@@ -78,27 +78,28 @@ def memory_mib() -> float | None:
     return round(total, 3) if parsed else None
 
 
-def predicted_ratio() -> float | None:
+def predicted_ratio() -> tuple[float | None, int]:
     raw = kubectl(
         "get",
         "--raw",
-        f"/apis/external.metrics.k8s.io/v1beta1/namespaces/{NAMESPACE}/kubeguard_predicted_memory_ratio?labelSelector=pod%3Dmemory-workload-0",
+        f"/apis/custom.metrics.k8s.io/v1beta1/namespaces/{NAMESPACE}/pods/*/kubeguard_predicted_memory_ratio?labelSelector=app%3Dmemory-workload",
         check=False,
     )
     if not raw:
-        return None
+        return None, 0
     try:
         items = json.loads(raw).get("items", [])
-        return float(items[0]["value"].removesuffix("m")) / 1000 if items else None
+        values = [float(item["value"].removesuffix("m")) / 1000 for item in items]
+        return (sum(values) / len(values), len(values)) if values else (None, 0)
     except (ValueError, KeyError, IndexError, json.JSONDecodeError):
-        return None
+        return None, 0
 
 
-def wait_for_single_workload(timeout_seconds: int = 180) -> None:
+def wait_for_single_workload(timeout_seconds: int = 180) -> str:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        statefulset = json.loads(
-            kubectl("get", "statefulset/memory-workload", "-n", NAMESPACE, "-o", "json")
+        deployment = json.loads(
+            kubectl("get", "deployment/memory-workload", "-n", NAMESPACE, "-o", "json")
         )
         pods = json.loads(
             kubectl("get", "pods", "-n", NAMESPACE, "-l", "app=memory-workload", "-o", "json")
@@ -106,16 +107,30 @@ def wait_for_single_workload(timeout_seconds: int = 180) -> None:
         active_pods = [
             pod for pod in pods.get("items", []) if not pod.get("metadata", {}).get("deletionTimestamp")
         ]
-        status = statefulset.get("status", {})
+        status = deployment.get("status", {})
         if (
-            int(statefulset.get("spec", {}).get("replicas", 0)) == 1
+            int(deployment.get("spec", {}).get("replicas", 0)) == 1
             and int(status.get("readyReplicas", 0)) == 1
             and len(active_pods) == 1
-            and active_pods[0].get("metadata", {}).get("name") == "memory-workload-0"
         ):
-            return
+            return active_pods[0]["metadata"]["name"]
         time.sleep(2)
     raise RuntimeError("workload did not converge to exactly one ready pod")
+
+
+def wait_for_no_load_generator(timeout_seconds: int = 120) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        pods = json.loads(
+            kubectl("get", "pods", "-n", NAMESPACE, "-l", "app=load-generator", "-o", "json")
+        )
+        active = [
+            pod for pod in pods.get("items", []) if not pod.get("metadata", {}).get("deletionTimestamp")
+        ]
+        if not active:
+            return
+        time.sleep(1)
+    raise RuntimeError("load generator did not stop")
 
 
 @dataclass
@@ -125,6 +140,7 @@ class Sample:
     ready_replicas: int
     total_memory_mib: float | None
     predicted_memory_ratio: float | None
+    predicted_pod_count: int
     restarts: int
     oom_events: int
 
@@ -132,18 +148,24 @@ class Sample:
 def reset_workload() -> None:
     kubectl("delete", "hpa", "memory-workload-standard", "memory-workload-predictive", "-n", NAMESPACE, "--ignore-not-found")
     kubectl("scale", "deployment/load-generator", "-n", NAMESPACE, "--replicas=0")
-    kubectl("scale", "statefulset/memory-workload", "-n", NAMESPACE, "--replicas=1")
-    wait_for_single_workload()
+    wait_for_no_load_generator()
+    kubectl("scale", "deployment/memory-workload", "-n", NAMESPACE, "--replicas=1")
+    pod_name = wait_for_single_workload()
     kubectl(
-        "delete", "pod/memory-workload-0", "-n", NAMESPACE, "--wait=true", command_timeout=180
+        "delete", f"pod/{pod_name}", "-n", NAMESPACE, "--wait=true", command_timeout=180
     )
     kubectl(
-        "rollout", "status", "statefulset/memory-workload", "-n", NAMESPACE, "--timeout=3m", command_timeout=210
-    )
-    kubectl(
-        "wait", "--for=condition=Ready", "pod/memory-workload-0", "-n", NAMESPACE, "--timeout=3m", command_timeout=210
+        "rollout", "status", "deployment/memory-workload", "-n", NAMESPACE, "--timeout=3m", command_timeout=210
     )
     wait_for_single_workload()
+    # Metrics Server can briefly retain samples for the recreated pod name. A
+    # quiet period prevents stale load from influencing the next HPA trial.
+    time.sleep(30)
+    kubectl("rollout", "restart", "deployment/kubeguard-exporter", "-n", NAMESPACE)
+    kubectl(
+        "rollout", "status", "deployment/kubeguard-exporter", "-n", NAMESPACE,
+        "--timeout=3m", command_timeout=210,
+    )
     kubectl("rollout", "restart", "deployment/kubepulse-agent", "-n", NAMESPACE)
     kubectl(
         "rollout", "status", "deployment/kubepulse-agent", "-n", NAMESPACE, "--timeout=3m", command_timeout=210
@@ -166,10 +188,12 @@ def run_trial(name: str, hpa_manifest: Path, duration: int, interval: int) -> tu
         while time.monotonic() - started <= duration:
             elapsed = round(time.monotonic() - started, 2)
             state = workload_state()
+            ratio, metric_pod_count = predicted_ratio()
             sample = Sample(
                 elapsed_seconds=elapsed,
                 total_memory_mib=memory_mib(),
-                predicted_memory_ratio=predicted_ratio(),
+                predicted_memory_ratio=round(ratio, 6) if ratio is not None else None,
+                predicted_pod_count=metric_pod_count,
                 **state,
             )
             samples.append(sample)
@@ -206,7 +230,7 @@ def write_results(output: Path, trials: list[tuple[list[Sample], dict[str, Any]]
     for samples, summary in trials:
         summaries.append(summary)
         with (output / f"{summary['trial']}.csv").open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=asdict(samples[0]).keys())
+            writer = csv.DictWriter(handle, fieldnames=asdict(samples[0]).keys(), lineterminator="\n")
             writer.writeheader()
             writer.writerows(asdict(sample) for sample in samples)
 

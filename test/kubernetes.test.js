@@ -34,3 +34,26 @@ test("selects a container and detects CrashLoopBackOff", async () => {
   assert.equal(await client.getMemoryLimitBytes(), 512 * 2 ** 20);
   assert.equal(await client.isCrashLooping(), true);
 });
+
+test("discovers active pods by label selector and reads individual limits", async () => {
+  const requests = [];
+  const pods = [
+    { metadata: { name: "api-0" }, spec: { containers: [{ name: "app", resources: { limits: { memory: "128Mi" } } }] } },
+    { metadata: { name: "api-1" }, spec: { containers: [{ name: "app", resources: { limits: { memory: "256Mi" } } }] } },
+    { metadata: { name: "api-old", deletionTimestamp: "2026-10-18T00:00:00Z" }, spec: { containers: [] } },
+  ];
+  const client = new KubernetesClient({
+    httpClient: { get: async (url, options) => {
+      requests.push({ url, options });
+      return { data: { items: pods } };
+    } },
+    baseUrl: "http://kube.test",
+    namespace: "shop",
+    podSelector: "app=api,tier=web",
+    containerName: "app",
+  });
+  const discovered = await client.listPods();
+  assert.deepEqual(discovered.map((pod) => pod.metadata.name), ["api-0", "api-1"]);
+  assert.equal(client.getMemoryLimitBytesFromPod(discovered[0]), 128 * 2 ** 20);
+  assert.deepEqual(requests[0].options.params, { labelSelector: "app=api,tier=web" });
+});

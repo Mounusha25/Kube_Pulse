@@ -6,7 +6,7 @@ metadata:
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
-    kind: StatefulSet
+    kind: Deployment
     name: memory-workload
   minReplicas: 1
   maxReplicas: 6
@@ -24,14 +24,11 @@ spec:
           value: 100
           periodSeconds: 15
   metrics:
-    - type: External
-      external:
+    - type: Pods
+      pods:
         metric:
           name: kubeguard_predicted_memory_ratio
-          selector:
-            matchLabels:
-              pod: memory-workload-0
         target:
-          type: Value
-          value: 220m
+          type: AverageValue
+          averageValue: 350m
 
