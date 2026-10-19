@@ -4,6 +4,7 @@
 
 > **Real-time pod memory forecasting, anomaly detection, and predictive autoscaling for Kubernetes workloads.**
 
+[![CI](https://github.com/Mounusha25/Kube_Pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/Mounusha25/Kube_Pulse/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=flat&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org/)
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go&logoColor=white)](https://golang.org/)

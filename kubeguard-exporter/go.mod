@@ -1,4 +1,4 @@
-module github.com/Brijesh03032001/kubeguard-exporter
+module github.com/Mounusha25/Kube_Pulse/kubeguard-exporter
 
 go 1.22
 
